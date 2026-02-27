@@ -1,0 +1,156 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProcessState {
+    New,
+    Ready,
+    Running,
+    WaitingSyscall,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProgramCounter {
+    pub dag_id: String,
+    pub current_node: String,
+    pub total_nodes: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryPointers {
+    pub l1_instruction: String,
+    pub l2_context_refs: Vec<String>,
+    pub swap_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Registers {
+    pub accumulator: String,
+    pub temp_vars: HashMap<String, String>,
+    pub sys_error_traceback: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExecutionMetrics {
+    pub tokens_consumed: u64,
+    pub cycles_executed: u32,
+    pub max_cycles_allowed: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PCB {
+    pub pid: String,
+    pub parent_pid: Option<String>,
+    pub process_name: String,
+    pub created_at: DateTime<Utc>,
+    pub state: ProcessState,
+    pub priority: u32,
+    pub program_counter: ProgramCounter,
+    pub memory_pointers: MemoryPointers,
+    pub registers: Registers,
+    pub execution_metrics: ExecutionMetrics,
+}
+
+impl PCB {
+    pub fn new(name: String, priority: u32, l1_prompt: String) -> Self {
+        Self {
+            pid: format!("proc_{}", Uuid::new_v4().to_string()[..8].to_string()),
+            parent_pid: None,
+            process_name: name,
+            created_at: Utc::now(),
+            state: ProcessState::New,
+            priority,
+            program_counter: ProgramCounter {
+                dag_id: "pending".to_string(),
+                current_node: "start".to_string(),
+                total_nodes: 0,
+            },
+            memory_pointers: MemoryPointers {
+                l1_instruction: l1_prompt,
+                l2_context_refs: Vec::new(),
+                swap_refs: Vec::new(),
+            },
+            registers: Registers {
+                accumulator: String::new(),
+                temp_vars: HashMap::new(),
+                sys_error_traceback: None,
+            },
+            execution_metrics: ExecutionMetrics {
+                tokens_consumed: 0,
+                cycles_executed: 0,
+                max_cycles_allowed: 15,
+            },
+        }
+    }
+
+    pub fn to_json(&self) -> anyhow::Result<String> {
+        Ok(serde_json::to_string(self)?)
+    }
+
+    pub fn from_json(json: &str) -> anyhow::Result<Self> {
+        Ok(serde_json::from_str(json)?)
+    }
+}
+
+// Implementación de ordenamiento para BinaryHeap (Priority Queue)
+// Rust's BinaryHeap es un Max-Heap. Prioridad 10 > Prioridad 0.
+impl Ord for PCB {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.priority.cmp(&other.priority)
+            .then_with(|| self.created_at.cmp(&other.created_at).reverse()) // Si empate, el más antiguo primero
+    }
+}
+
+impl PartialOrd for PCB {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pcb_creation_and_state_change() {
+        let name = "TestProcess".to_string();
+        let mut pcb = PCB::new(name.clone(), 5, "Prompt".to_string());
+        
+        assert_eq!(pcb.process_name, name);
+        assert_eq!(pcb.state, ProcessState::New);
+        assert_eq!(pcb.priority, 5);
+        assert!(pcb.pid.starts_with("proc_"));
+
+        // Cambio de estado
+        pcb.state = ProcessState::WaitingSyscall;
+        assert_eq!(pcb.state, ProcessState::WaitingSyscall);
+        
+        // Verificar inmutabilidad de otros campos (manualmente)
+        assert_eq!(pcb.priority, 5);
+        assert_eq!(pcb.process_name, name);
+    }
+
+    #[test]
+    fn test_pcb_serialization() {
+        let pcb = PCB::new("SerializeTest".to_string(), 10, "prompt".to_string());
+        let json = pcb.to_json().expect("Failed to serialize");
+        
+        let deserialized: PCB = PCB::from_json(&json).expect("Failed to deserialize");
+        assert_eq!(pcb.pid, deserialized.pid);
+        assert_eq!(pcb.priority, deserialized.priority);
+        assert_eq!(pcb.memory_pointers.l1_instruction, deserialized.memory_pointers.l1_instruction);
+    }
+
+    #[test]
+    fn test_pcb_ordering() {
+        let pcb_low = PCB::new("Low".to_string(), 1, "low".to_string());
+        let pcb_high = PCB::new("High".to_string(), 10, "high".to_string());
+        
+        // En nuestro BinaryHeap de Rust, el mayor va primero.
+        assert!(pcb_high > pcb_low);
+    }
+}

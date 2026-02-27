@@ -64,6 +64,10 @@ message TaskEvent {
   }
 }
 
+message TaskSubscription {
+  string pid = 1;
+}
+
 message TaskResponse {
   string pid = 1;
   bool accepted = 2;

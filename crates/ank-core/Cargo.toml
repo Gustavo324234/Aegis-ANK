@@ -1,0 +1,21 @@
+[package]
+name = "ank-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ank-proto = { path = "../ank-proto" }
+tokio.workspace = true
+tonic.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+# Inferencia Nativa (Llama.cpp)
+llama-cpp-2 = "0.3.0"
+
+# Base de Datos Vectorial Embebida (VCM)
+lancedb = "0.4.0"
+
+# Para crear IDs únicos
+uuid = { version = "1.8", features = ["v4"] }

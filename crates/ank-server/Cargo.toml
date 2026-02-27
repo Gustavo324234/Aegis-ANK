@@ -1,0 +1,15 @@
+[package]
+name = "ank-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ank-core = { path = "../ank-core" }
+ank-proto = { path = "../ank-proto" }
+tokio.workspace = true
+tonic.workspace = true
+anyhow.workspace = true
+tokio-stream.workspace = true
+futures-util.workspace = true
+tracing = "0.1" # Logging de alto rendimiento
+tracing-subscriber = "0.3"

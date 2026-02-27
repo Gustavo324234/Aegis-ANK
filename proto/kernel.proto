@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package ank.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// El servicio principal del Kernel
+service KernelService {
+  // Envía una misión al Kernel
+  rpc SubmitTask (TaskRequest) returns (TaskResponse);
+  
+  // Stream de eventos (pensamiento, logs, progreso)
+  rpc WatchTask (TaskSubscription) returns (stream TaskEvent);
+  
+  // Control de hardware y modelos
+  rpc GetSystemStatus (Empty) returns (SystemStatus);
+}
+
+message TaskRequest {
+  string prompt = 1;
+  Priority priority = 2;
+  ModelPreference model_pref = 3; // Nube, Local o Híbrido
+}
+
+enum Priority {
+  PRIORITY_LOW = 0;
+  PRIORITY_MEDIUM = 5;
+  PRIORITY_HIGH = 10;
+}
+
+message ModelPreference {
+  enum ExecutionMode {
+    LOCAL_ONLY = 0;
+    CLOUD_ONLY = 1;
+    HYBRID_SMART = 2;
+  }
+  ExecutionMode mode = 1;
+  string specific_model = 2; // Opcional
+}
+
+// Estructura del PCB (Process Control Block)
+message PCB {
+  string pid = 1;
+  string state = 2;
+  uint32 program_counter = 3;
+  
+  message Memory {
+    string l1_instruction = 1;
+    repeated string l2_refs = 2;
+    repeated string swap_ids = 3;
+  }
+  Memory memory = 4;
+  
+  map<string, string> registers = 5;
+}
+
+message TaskEvent {
+  string pid = 1;
+  oneof payload {
+    string thought = 2;   // Lo que la IA está pensando
+    string output = 3;    // Resultado final o parcial
+    string sys_log = 4;   // Logs del Kernel
+    PCB updated_pcb = 5;  // Estado actualizado del proceso
+  }
+}
+
+message TaskResponse {
+  string pid = 1;
+  bool accepted = 2;
+}
+
+message SystemStatus {
+  float cpu_usage = 1;
+  float vram_usage = 2;
+  string active_model = 3;
+  bool is_local_inference_ready = 4;
+}
+
+message Empty {}

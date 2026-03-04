@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.2] - 2026-03-04
+### Fixed
+- **[ANK-112] Cold-Fix: Critical API & Mapping Mismatch**:
+    - **Wasmtime v29 Compatibility**: Updated `preopened_dir` call in `PluginManager` to support the new 4-argument API, removing the deprecated `open_ambient_dir` requirement.
+    - **Citadel Protocol Integrity**: Fixed missing `tenant_id` and `session_key` fields in the `PCB` to Protobuf conversion, ensuring full security context propagation during process teleportation.
+
 ## [1.0.1] - 2026-03-04
 ### Added
 - **[ANK-111] Repository Security & Ignore Policy**:

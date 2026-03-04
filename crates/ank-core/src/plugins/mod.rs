@@ -207,16 +207,23 @@ impl PluginManager {
         std::fs::create_dir_all(&workspace_path)
             .map_err(|e| PluginError::IOError(format!("Critical: Failed to create jail for tenant {}: {}", tenant_id, e)))?;
 
-        // Abrir el directorio del host con capacidades restringidas (cap-std)
-        // Esto expone físicamente la carpeta del tenant como /workspace dentro del entorno Wasm.
-        let dir = wasmtime_wasi::Dir::open_ambient_dir(&workspace_path, wasmtime_wasi::ambient_authority())
-            .map_err(|e| PluginError::SecurityViolation(format!("Sandbox Escape Prevention: Failed to open preopened dir for {}: {}", tenant_id, e)))?;
-
-        let wasi_ctx = WasiCtxBuilder::new()
+        let mut wasi_builder = wasmtime_wasi::WasiCtxBuilder::new();
+        wasi_builder
             .stdin(stdin)
             .stdout(stdout.clone())
-            .preopened_dir(dir, "/workspace")
-            .build_p1();
+            .preopened_dir(
+                &workspace_path,
+                "/workspace",
+                wasmtime_wasi::DirPerms::all(),
+                wasmtime_wasi::FilePerms::all(),
+            )
+            .map_err(|e| {
+                PluginError::SecurityViolation(format!(
+                    "Sandbox Escape Prevention: Failed to open preopened dir for {}: {}",
+                    tenant_id, e
+                ))
+            })?;
+        let wasi_ctx = wasi_builder.build_p1();
 
         let state = PluginState {
             wasi_ctx,

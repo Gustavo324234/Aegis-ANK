@@ -5,6 +5,7 @@ Este archivo es la fuente de verdad del progreso del Aegis Neural Kernel. El pro
 El sistema base del Aegis Neural Kernel está completado de forma integral, incluyendo Scheduler, cHAL, VCM, Swarm Discovery, Sandbox Wasm y el Protocolo Citadel.
 
 🟩 DONE (Completado)
+- [ANK-112] Cold-Fix: API Wasmtime & Mapeo Citadel (v1.0.2)
 - [ANK-111] Repository Security & Ignore Policy (v1.0.1)
 - [ANK-900] Debian SRE Deployment & Build Pipeline (v1.0.0)
 - [ANK-805] Tool Discovery & Prompt Injection (v0.11.0)

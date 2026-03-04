@@ -3,8 +3,6 @@ use crate::scribe::CommitMetadata;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
-use std::net::IpAddr;
-use std::time::Duration;
 use thiserror::Error;
 
 /// --- SYSCALL ENUM ---

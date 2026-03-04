@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.3] - 2026-03-04
+### Fixed
+- **[ANK-113] Server Borrow Order & Import Cleanup**:
+    - **Tonic Request Fix (E0382)**: Resolved a "borrow of moved value" error in `AnkRpcServer` by extracting `CitadelAuth` extensions before consuming the request body with `into_inner()`.
+    - **Import Optimization**: Removed unused imports (`WasiCtxBuilder`, `IpAddr`, `Duration`) in `ank-core` to ensure a clean, warning-free build in production.
+
 ## [1.0.2] - 2026-03-04
 ### Fixed
 - **[ANK-112] Cold-Fix: Critical API & Mapping Mismatch**:

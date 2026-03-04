@@ -77,17 +77,18 @@ impl KernelService for AnkRpcServer {
         &self,
         request: Request<TaskRequest>,
     ) -> Result<Response<TaskResponse>, Status> {
+        // Extraction of Multi-Tenant context from gRPC Extensions (injected by Interceptor)
+        let auth = request
+            .extensions()
+            .get::<CitadelAuth>()
+            .cloned()
+            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
         let req = request.into_inner();
 
         if req.prompt.is_empty() {
             return Err(Status::invalid_argument("Prompt cannot be empty"));
         }
-
-        // Extraction of Multi-Tenant context from gRPC Extensions (injected by Interceptor)
-        let auth = request
-            .extensions()
-            .get::<CitadelAuth>()
-            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
 
         // Mapping proto priority to core priority
         let priority = match req.priority() {
@@ -136,9 +137,11 @@ impl KernelService for AnkRpcServer {
         let _auth = request
             .extensions()
             .get::<CitadelAuth>()
+            .cloned()
             .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
 
         let req = request.into_inner();
+
         let pid = req.pid;
 
         info!("Client subscribing to events for PID: {}", pid);
@@ -156,8 +159,14 @@ impl KernelService for AnkRpcServer {
 
     async fn get_system_status(
         &self,
-        _request: Request<Empty>,
+        request: Request<Empty>,
     ) -> Result<Response<SystemStatus>, Status> {
+        // Validation of Multi-Tenant context
+        let _auth = request
+            .extensions()
+            .get::<CitadelAuth>()
+            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
         // En esta fase, devolvemos valores mockeados o telemetría básica
         Ok(Response::new(SystemStatus {
             cpu_load: 0.15,
@@ -172,8 +181,14 @@ impl KernelService for AnkRpcServer {
 
     async fn list_processes(
         &self,
-        _request: Request<Empty>,
+        request: Request<Empty>,
     ) -> Result<Response<ProcessList>, Status> {
+        // Validation of Multi-Tenant context
+        let _auth = request
+            .extensions()
+            .get::<CitadelAuth>()
+            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
         // Implementación pendiente del Scheduler
         Ok(Response::new(ProcessList {
             processes: Vec::new(),
@@ -187,14 +202,15 @@ impl KernelService for AnkRpcServer {
         &self,
         request: Request<ProtoPcb>,
     ) -> Result<Response<Self::TeleportProcessStream>, Status> {
-        let pcb = request.into_inner();
-        let pid = pcb.pid.clone();
-
         // Extraction of Multi-Tenant context from gRPC Extensions
         let auth = request
             .extensions()
             .get::<CitadelAuth>()
+            .cloned()
             .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
+        let pcb = request.into_inner();
+        let pid = pcb.pid.clone();
 
         // Convertir ProtoPcb a CorePCB (Mapeo básico por ahora)
         let mut core_pcb = CorePCB::new(

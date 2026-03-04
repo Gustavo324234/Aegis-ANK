@@ -3,7 +3,7 @@ use std::path::Path;
 use thiserror::Error;
 use wasmtime::{Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::pipe::{MemoryInputPipe, MemoryOutputPipe};
-use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
 use tracing::info;
 
 /// --- PLUGIN ERROR SYSTEM ---

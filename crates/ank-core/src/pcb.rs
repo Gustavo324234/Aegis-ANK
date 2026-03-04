@@ -1,6 +1,7 @@
+use crate::scheduler::ModelPreference;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -41,7 +42,7 @@ pub struct ExecutionMetrics {
     pub max_cycles_allowed: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PCB {
     pub pid: String,
     pub parent_pid: Option<String>,
@@ -53,12 +54,31 @@ pub struct PCB {
     pub memory_pointers: MemoryPointers,
     pub registers: Registers,
     pub execution_metrics: ExecutionMetrics,
+    pub model_pref: ModelPreference,
+    /// Archivos o contenido empaquetado para migración (Teleportación)
+    pub inlined_context: HashMap<String, String>,
+    // --- Multi-Tenant & Zero-Knowledge ---
+    pub tenant_id: Option<String>,
+    pub session_key: Option<String>, // Sensitive: Avoid logging this!
+}
+
+impl std::fmt::Debug for PCB {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PCB")
+            .field("pid", &self.pid)
+            .field("tenant_id", &self.tenant_id)
+            .field("session_key", &self.session_key.as_ref().map(|_| "***REDACTED***"))
+            .field("state", &self.state)
+            .field("priority", &self.priority)
+            .field("process_name", &self.process_name)
+            .finish()
+    }
 }
 
 impl PCB {
     pub fn new(name: String, priority: u32, l1_prompt: String) -> Self {
         Self {
-            pid: format!("proc_{}", Uuid::new_v4().to_string()[..8].to_string()),
+            pid: format!("proc_{}", &Uuid::new_v4().to_string()[..8]),
             parent_pid: None,
             process_name: name,
             created_at: Utc::now(),
@@ -84,6 +104,10 @@ impl PCB {
                 cycles_executed: 0,
                 max_cycles_allowed: 15,
             },
+            model_pref: ModelPreference::HybridSmart,
+            inlined_context: HashMap::new(),
+            tenant_id: None,
+            session_key: None,
         }
     }
 
@@ -100,7 +124,8 @@ impl PCB {
 // Rust's BinaryHeap es un Max-Heap. Prioridad 10 > Prioridad 0.
 impl Ord for PCB {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.priority.cmp(&other.priority)
+        self.priority
+            .cmp(&other.priority)
             .then_with(|| self.created_at.cmp(&other.created_at).reverse()) // Si empate, el más antiguo primero
     }
 }
@@ -119,7 +144,7 @@ mod tests {
     fn test_pcb_creation_and_state_change() {
         let name = "TestProcess".to_string();
         let mut pcb = PCB::new(name.clone(), 5, "Prompt".to_string());
-        
+
         assert_eq!(pcb.process_name, name);
         assert_eq!(pcb.state, ProcessState::New);
         assert_eq!(pcb.priority, 5);
@@ -128,7 +153,7 @@ mod tests {
         // Cambio de estado
         pcb.state = ProcessState::WaitingSyscall;
         assert_eq!(pcb.state, ProcessState::WaitingSyscall);
-        
+
         // Verificar inmutabilidad de otros campos (manualmente)
         assert_eq!(pcb.priority, 5);
         assert_eq!(pcb.process_name, name);
@@ -138,18 +163,21 @@ mod tests {
     fn test_pcb_serialization() {
         let pcb = PCB::new("SerializeTest".to_string(), 10, "prompt".to_string());
         let json = pcb.to_json().expect("Failed to serialize");
-        
+
         let deserialized: PCB = PCB::from_json(&json).expect("Failed to deserialize");
         assert_eq!(pcb.pid, deserialized.pid);
         assert_eq!(pcb.priority, deserialized.priority);
-        assert_eq!(pcb.memory_pointers.l1_instruction, deserialized.memory_pointers.l1_instruction);
+        assert_eq!(
+            pcb.memory_pointers.l1_instruction,
+            deserialized.memory_pointers.l1_instruction
+        );
     }
 
     #[test]
     fn test_pcb_ordering() {
         let pcb_low = PCB::new("Low".to_string(), 1, "low".to_string());
         let pcb_high = PCB::new("High".to_string(), 10, "high".to_string());
-        
+
         // En nuestro BinaryHeap de Rust, el mayor va primero.
         assert!(pcb_high > pcb_low);
     }

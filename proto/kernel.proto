@@ -3,81 +3,131 @@ syntax = "proto3";
 package ank.v1;
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
 
-// El servicio principal del Kernel
+// --- CORE KERNEL INTERFACE ---
+// The KernelService is the primary entry point for orchestrating LLM "ALUs".
 service KernelService {
-  // Envía una misión al Kernel
+  // Submits a new mission to the Kernel. Returns a PID (Process ID).
   rpc SubmitTask (TaskRequest) returns (TaskResponse);
   
-  // Stream de eventos (pensamiento, logs, progreso)
+  // Real-time stream of the process execution (Thinking, Syscalls, Results).
   rpc WatchTask (TaskSubscription) returns (stream TaskEvent);
   
-  // Control de hardware y modelos
+  // Returns detailed information about the Kernel's health and hardware usage.
   rpc GetSystemStatus (Empty) returns (SystemStatus);
+
+  // Lists all active processes in the Kernel.
+  rpc ListProcesses (Empty) returns (ProcessList);
+
+  // Teleports a full process. The Worker adds it to its local Scheduler.
+  // The stream returns real-time state changes (RUNNING, WAITING).
+  rpc TeleportProcess (PCB) returns (stream TaskEvent);
 }
 
+// --- MESSAGES ---
+
 message TaskRequest {
-  string prompt = 1;
-  Priority priority = 2;
-  ModelPreference model_pref = 3; // Nube, Local o Híbrido
+  string prompt = 1;         // The main instruction for the Kernel.
+  Priority priority = 2;     // Execution priority level.
+  ExecutionPolicy policy = 3; // How the Kernel should handle this task.
+  google.protobuf.Struct initial_context = 4; // Metadata or specific variables.
+  optional string tenant_id = 5; // The ID of the tenant owning this task.
 }
 
 enum Priority {
-  PRIORITY_LOW = 0;
-  PRIORITY_MEDIUM = 5;
-  PRIORITY_HIGH = 10;
+  PRIORITY_IDLE = 0;
+  PRIORITY_LOW = 1;
+  PRIORITY_NORMAL = 5;
+  PRIORITY_CRITICAL = 10;
 }
 
-message ModelPreference {
-  enum ExecutionMode {
-    LOCAL_ONLY = 0;
-    CLOUD_ONLY = 1;
-    HYBRID_SMART = 2;
+message ExecutionPolicy {
+  enum Mode {
+    MODE_STRICT = 0;   // Fails if any dependency is not met.
+    MODE_ADAPTIVE = 1; // Can fallback between models or strategies.
+    MODE_DRY_RUN = 2;  // Only generates DAG and validates, no execution.
   }
-  ExecutionMode mode = 1;
-  string specific_model = 2; // Opcional
+  Mode mode = 1;
+  string target_model_group = 2; // e.g., "coding", "logic", "fast"
+  uint32 max_retries = 3;
 }
 
-// Estructura del PCB (Process Control Block)
+// Process Control Block (PCB)
+// Represents the full state of a Cognitive Process.
 message PCB {
-  string pid = 1;
-  string state = 2;
-  uint32 program_counter = 3;
+  string pid = 1;                     // Unique identifier.
+  string parent_pid = 2;              // For hierarchical task fragmentation.
+  ProcessState state = 3;             // Current state (RUNNING, BLOCKED, etc).
+  uint32 quantum_used = 4;            // Time/Cycles spent in the current state.
   
-  message Memory {
-    string l1_instruction = 1;
-    repeated string l2_refs = 2;
-    repeated string swap_ids = 3;
+  message MemorySpace {
+    string instruction_pointer = 1;   // The current step in the DAG.
+    repeated string context_refs = 2; // LanceDB/Vector point IDs.
+    map<string, string> registers = 3; // Key-value "fast" memory.
   }
-  Memory memory = 4;
+  MemorySpace memory = 5;
   
-  map<string, string> registers = 5;
+  map<string, string> inlined_context = 6; // Resolved local dependencies for migration.
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp last_updated = 8;
+  uint32 priority = 9;
+  string process_name = 10;
+  string tenant_id = 11;
+  string session_key = 12;
+}
+
+enum ProcessState {
+  STATE_PENDING = 0;
+  STATE_RUNNING = 1;
+  STATE_BLOCKED = 2; // Waiting for Syscall or User Input.
+  STATE_SUSPENDED = 3;
+  STATE_COMPLETED = 4;
+  STATE_TERMINATED = 5;
+}
+
+message Syscall {
+  string name = 1;      // e.g., "memory_load", "web_search"
+  google.protobuf.Struct arguments = 2; // Named parameters for the syscall.
+  string return_type = 3; // Type of data expected back.
 }
 
 message TaskEvent {
   string pid = 1;
+  google.protobuf.Timestamp timestamp = 2;
   oneof payload {
-    string thought = 2;   // Lo que la IA está pensando
-    string output = 3;    // Resultado final o parcial
-    string sys_log = 4;   // Logs del Kernel
-    PCB updated_pcb = 5;  // Estado actualizado del proceso
+    string thought = 3;      // LLM Reasoning segment.
+    Syscall syscall = 4;     // Intercepted structured Neural Syscall.
+    string output = 5;       // Final or partial result.
+    PCB status_update = 6;   // Heartbeat with updated state.
+    string error = 7;        // Execution error or crash log.
   }
 }
 
+
 message TaskSubscription {
   string pid = 1;
+  optional string tenant_id = 2;
 }
 
 message TaskResponse {
   string pid = 1;
   bool accepted = 2;
+  string message = 3;
+}
+
+message ProcessList {
+  repeated PCB processes = 1;
 }
 
 message SystemStatus {
-  float cpu_usage = 1;
-  float vram_usage = 2;
-  string active_model = 3;
-  bool is_local_inference_ready = 4;
+  float cpu_load = 1;
+  float vram_allocated_mb = 2;
+  float vram_total_mb = 3;
+  uint32 total_processes = 4;
+  uint32 active_workers = 5;
+  string uptime = 6;
+  repeated string loaded_models = 7;
 }
 
 message Empty {}

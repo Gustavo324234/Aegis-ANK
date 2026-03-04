@@ -1,4 +1,4 @@
-use ank_core::{Scheduler, SchedulerEvent};
+use ank_core::{CognitiveScheduler, SchedulerEvent};
 use ank_proto::v1::kernel_service_server::KernelServiceServer;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,37 +10,46 @@ use ank_server::server::AnkRpcServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Inicializar logging
+    // Inicializar logging para ver métricas y trazas en consola
     tracing_subscriber::fmt::init();
 
-    info!("Aegis Neural Kernel (ANK) Bridge starting...");
+    info!("Aegis Neural Kernel (ANK) System Booting...");
 
-    // Canales de comunicación entre gRPC y Scheduler
+    // Canales de comunicación del bus de eventos entre gRPC y el Scheduler Cognitivo
     let (scheduler_tx, scheduler_rx) = mpsc::channel::<SchedulerEvent>(100);
-    
-    // El Event Broker gestiona los streams de output hacia los clientes
+    // Clon local del sender para inyección de dependencias distribuidas
+    let internal_tx = scheduler_tx.clone();
+
+    // El Event Broker gestiona los streams de output hacia los clientes gRPC
     let event_broker = Arc::new(RwLock::new(HashMap::new()));
-    
-    // Inicializar el Scheduler en background
-    let scheduler = Arc::new(RwLock::new(Scheduler::new()));
-    let scheduler_clone = Arc::clone(&scheduler);
-    
-    info!("Starting Cognitive Scheduler loop...");
+
+    // Inicializar el Cognitive Scheduler principal
+    let scheduler = CognitiveScheduler::new();
+
+    info!("Iniciando hilo de ejecución principal (Cognitive Scheduler)...");
     tokio::spawn(async move {
-        Scheduler::run(scheduler_clone, scheduler_rx).await;
+        // start requiere el Receiver pasivo y el Sender para loops internos/Teleport
+        if let Err(e) = scheduler.start(scheduler_rx, internal_tx).await {
+            tracing::error!("Scheduler loop crashed: {}", e);
+        }
     });
 
-    // Configuración del servidor gRPC
-    // TODO: Hacer el puerto configurable vía env var en futuras versiones
-    let addr = "127.0.0.1:50051".parse()?;
+    // Configuración e instanciación del servidor gRPC (0.0.0.0:50051 per req)
+    let addr = "0.0.0.0:50051".parse()?;
+    
+    // Instanciar el servicio con la UI / Cliente Python apuntando acá
     let ank_service = AnkRpcServer::new(scheduler_tx, Arc::clone(&event_broker));
 
-    info!("ANK-Bridge listening on {}", addr);
+    // Aplicar Middleware de Autenticación (Citadel Protocol)
+    let svc = KernelServiceServer::with_interceptor(
+        ank_service,
+        ank_server::server::auth_interceptor,
+    );
 
-    Server::builder()
-        .add_service(KernelServiceServer::new(ank_service))
-        .serve(addr)
-        .await?;
+    info!("ANK KernelService levantado exitosamente en {}", addr);
+
+    // Levantar Tonic Server
+    Server::builder().add_service(svc).serve(addr).await?;
 
     Ok(())
 }

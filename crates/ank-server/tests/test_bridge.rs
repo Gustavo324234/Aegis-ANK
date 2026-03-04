@@ -1,7 +1,7 @@
 use ank_core::SchedulerEvent;
-use ank_server::server::AnkRpcServer;
 use ank_proto::v1::kernel_service_server::KernelService;
-use ank_proto::v1::{TaskRequest, Priority as ProtoPriority};
+use ank_proto::v1::{Priority as ProtoPriority, TaskRequest};
+use ank_server::server::AnkRpcServer;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
@@ -15,22 +15,26 @@ async fn test_submit_task_logic() {
 
     let request = Request::new(TaskRequest {
         prompt: "Test prompt".to_string(),
-        priority: ProtoPriority::Medium as i32,
-        model_pref: None,
+        priority: ProtoPriority::Normal as i32,
+        policy: None,
+        initial_context: None,
     });
 
-    let response = server.submit_task(request).await.unwrap();
+    let response = server
+        .submit_task(request)
+        .await
+        .expect("Failed to submit task");
     let inner = response.into_inner();
 
     assert!(inner.accepted);
     assert!(inner.pid.starts_with("proc_"));
 
     // Verificar que el scheduler recibió el evento
-    let event = rx.try_recv().unwrap();
-    if let SchedulerEvent::RegisterProcess(pcb) = event {
+    let event = rx.try_recv().expect("No event received");
+    if let SchedulerEvent::ScheduleTask(pcb) = event {
         assert_eq!(pcb.pid, inner.pid);
         assert_eq!(pcb.priority, 5);
-        assert_eq!(pcb.memory_pointers.l1_instruction, "Test prompt");
+        assert_eq!(pcb.process_name, "Remote Task");
     } else {
         panic!("Wrong event type");
     }

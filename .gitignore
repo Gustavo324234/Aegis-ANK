@@ -1,0 +1,50 @@
+# Aegis Neural Kernel (ANK) - Repository Ignore Policy
+
+# --- Rust / Cargo ---
+/target/
+/target_wasm/
+Cargo.lock
+debug/
+release/
+*.pdb
+
+# --- Environment & Secrets ---
+.env
+.env.*
+*.key
+*.pem
+/cert/
+/secrets/
+
+# --- Databases & Memory ---
+*.sqlite
+*.sqlite-journal
+*.db
+*.db-journal
+/lancedb/
+/memory_swap/
+
+# --- Logs & Temporaries ---
+*.log
+/tmp/
+check_out.txt
+tree.txt
+
+# --- IDEs / Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.settings/
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
+
+# --- AI Agents & Internal Metadata ---
+/.agents/
+/AGENTS.md
+
+# --- Task Tracking (Requested for exclusion) ---
+/Tickets/

@@ -1,0 +1,32 @@
+[package]
+name = "ank-plugins"
+version = "0.1.0"
+edition = "2021"
+authors = ["Antigravity <antigravity@aegis.ai>"]
+
+[workspace]
+# This makes it a separate workspace from the root ANK project
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = { version = "1.0" }
+
+[[bin]]
+name = "std_sys"
+path = "src/bin/std_sys.rs"
+
+[[bin]]
+name = "std_fs"
+path = "src/bin/std_fs.rs"
+
+[[bin]]
+name = "std_net"
+path = "src/bin/std_net.rs"
+
+[profile.release]
+opt-level = "s"
+strip = true
+lto = true
+codegen-units = 1

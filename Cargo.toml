@@ -2,17 +2,46 @@
 members = [
     "crates/ank-proto",
     "crates/ank-core",
-    "crates/ank-server"
+    "crates/ank-server",
 ]
 resolver = "2"
 
 [workspace.dependencies]
-# Dependencias compartidas para mantener las versiones sincronizadas
-tokio = { version = "1.36", features = ["full"] }
-tonic = "0.11"
-prost = "0.12"
+# --- Core Runtime & Networking ---
+tokio = { version = "1.41", features = ["full", "tracing"] }
+tonic = "0.12"
+tonic-build = "0.12"
+prost = "0.13.3"
+prost-types = "0.13.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-anyhow = "1.0" # Manejo de errores profesional
+anyhow = "1.0"
 tokio-stream = "0.1"
-futures-util = "0.3" # Para stream helpers
+futures-util = "0.3"
+async-trait = "0.1"
+thiserror = "2.0"
+arrow = "52"
+arrow-array = "52"
+arrow-schema = "52"
+arrow-buffer = "52"
+futures = "0.3"
+
+# --- Cognitive Infrastructure (LLM & Vector DB) ---
+# llama-cpp-2 for high-performance GGUF inference
+llama-cpp-2 = "0.1" 
+# lancedb for Vectorized Memory (VCM)
+# lancedb = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
+
+# --- System & OS Level ---
+git2 = "0.19" # For workspace/project awareness
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "=0.4.38", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+wasmtime = { version = "29.0", features = ["async"] }
+wasmtime-wasi = "29.0"
+regex = "1.10"
+mdns-sd = "0.11"
+
+

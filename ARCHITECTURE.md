@@ -74,3 +74,27 @@ Para garantizar la longevidad del Kernel y su adaptabilidad a la Ley de Moore de
 1. **Agnosticismo de Modelos:** El Kernel y el Scheduler operan con "Clases de Interfaces" (ej. `Logic_ALU`, `Code_ALU`, `Fast_Router_ALU`). Nunca se hace referencia a modelos específicos (como Llama o Mistral) en el código core.
 2. **Hardware-Aware Routing:** El cHAL monitorea la RAM/VRAM en tiempo real. Si el sistema está bajo presión de memoria, el cHAL puede degradar la petición a un modelo más pequeño o encolar la tarea hasta que la VRAM se libere.
 3. **Escalabilidad Dinámica:** Si el usuario migra su entorno de una laptop (Tier 1) a un servidor con múltiples GPUs (Tier 3), ANK detecta el hardware en el arranque y pasa de una ejecución secuencial agresivamente paginada, a una ejecución multi-hilo con modelos de 32B o 70B residentes en VRAM.
+
+## 🏰 The Citadel Protocol (Multi-Tenancy & Zero-Knowledge)
+
+Para garantizar un aislamiento de grado empresarial y privacidad criptográfica, ANK implementa una arquitectura Zero-Trust. El Kernel no almacena contraseñas ni estado global inseguro.
+
+1. **Jailing (Aislamiento Físico):** Las operaciones de disco (VCM y The Scribe) y la memoria vectorial (LanceDB) no operan en un entorno global. El sistema enruta toda la I/O a `/users/{tenant_id}/...`. Un PCB de un tenant es físicamente incapaz de acceder a los archivos de otro.
+2. **Llaves Efímeras (gRPC Interceptors):** El cliente inyecta un `tenant_id` y una `session_key` (llave de encriptación derivada) en los metadatos (headers) de cada llamada gRPC. El Kernel mantiene esta llave en memoria RAM volátil solo durante la vida útil del proceso.
+3. **Encriptación en Reposo (SQLCipher):** Cualquier base de datos de estado relacional manejada por el Kernel se encripta con AES-256 utilizando `rusqlite` con `bundled-sqlcipher`. Al finalizar el proceso o reiniciar el Kernel, los datos vuelven a ser criptográficamente inaccesibles sin la llave proporcionada por el cliente.
+
+
+## 🚀 The Horizon (Fases 2 a 4)
+
+El diseño del Kernel base (Fase 1) está construido específicamente para soportar el siguiente horizonte de escalabilidad:
+
+### Fase 2: User Space & The Senses (Plugins)
+- **Wasm Tooling Ecosystem:** Las herramientas dejarán de estar en código duro. ANK cargará plugins compilados en WebAssembly en tiempo de ejecución, permitiendo a la comunidad escribir "Drivers Cognitivos" en cualquier lenguaje.
+- **El Demonio Chronos:** Un proceso de recolección de basura cognitiva (Garbage Collector) de latencia cero que correrá en background, consolidando recuerdos diarios en LanceDB cuando el sistema detecte inactividad (Idle).
+
+### Fase 3: The Neural Swarm (Computación Distribuida)
+- **Teleportación de PCBs:** Gracias a la serialización Protobuf y gRPC, un ANK instalado en un dispositivo de bajos recursos (Tier 1) podrá transferir un PCB en estado `READY` a un nodo ANK potente (Tier 3) en la misma red local.
+- **Ejecución Paralela de DAGs:** Nodos de un mismo Grafo podrán ejecutarse simultáneamente en diferentes máquinas de la mente colmena.
+
+### Fase 4: La Asimilación (Aegis-IA UI)
+- **Desacoplamiento Total:** Reemplazo del monolito `brain.py` actual de Aegis. La interfaz en React y FastAPI pasará a ser un cliente ligero (Thin Client) que simplemente se suscribe a los streams de eventos gRPC del Kernel, logrando una reactividad visual de 0 milisegundos.

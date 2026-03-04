@@ -1,91 +1,276 @@
-use crate::pcb::{PCB, ProcessState};
+use anyhow::Context;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
-use tracing::{info, warn};
+use crate::pcb::{ProcessState, PCB};
+use crate::swarm::{NodeStatus, SwarmManager};
+use crate::swarm::client::SwarmClient;
+use tracing::{info, instrument, warn, error};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModelPreference {
+    LocalOnly,
+    CloudOnly,
+    HybridSmart,
+}
+
+pub type SharedPCB = Arc<RwLock<PCB>>;
+
+impl ModelPreference {
+    /// Determina si la tarea es lo suficientemente compleja como para requerir
+    /// un Hardware Tier superior (> 1).
+    pub fn is_complex(&self) -> bool {
+        match self {
+            ModelPreference::CloudOnly => true,
+            ModelPreference::HybridSmart => true, // Por defecto, Hybrid intenta lo mejor
+            ModelPreference::LocalOnly => false,
+        }
+    }
+}
+
+impl PCB {
+    pub fn mock(_pid: &str, priority: u32) -> Self {
+        Self::new("MockTask".to_string(), priority, "mock prompt".to_string())
+    }
+}
+
+/// --- EVENT BUS (Canales MPSC) ---
+#[derive(Debug)]
 pub enum SchedulerEvent {
-    RegisterProcess(PCB),
+    ScheduleTask(Box<PCB>),
+    DispatchLocal(Box<PCB>), // Nuevo: Re-encolado forzado para ejecución local
     SyscallCompleted { pid: String, result: String },
-    ProcessTerminated { pid: String, success: bool },
+    RemoteEvent(String, ank_proto::v1::TaskEvent), // Nuevo: Evento interceptado de un nodo remoto
+    PreemptCurrent,
+    TerminateProcess(String),
 }
 
-pub struct Scheduler {
-    ready_queue: BinaryHeap<PCB>,
-    waiting_queue: HashMap<String, PCB>,
-    current_running: Option<PCB>,
+/// --- COGNITIVE SCHEDULER ---
+pub struct CognitiveScheduler {
+    pub ready_queue: BinaryHeap<PCB>,
+    pub waiting_queue: HashMap<String, PCB>,
+    pub process_table: HashMap<String, PCB>,
+    pub current_running: Option<String>,
+    pub last_activity: DateTime<Utc>,
+
+    // Infraestructura del Enjambre
+    pub swarm_manager: Option<Arc<SwarmManager>>,
+    pub swarm_client: Arc<SwarmClient>,
+    // Canal para auto-enviarse eventos de recovery
+    pub internal_tx: Option<mpsc::Sender<SchedulerEvent>>,
 }
 
-impl Scheduler {
+impl CognitiveScheduler {
     pub fn new() -> Self {
         Self {
             ready_queue: BinaryHeap::new(),
             waiting_queue: HashMap::new(),
+            process_table: HashMap::new(),
             current_running: None,
+            last_activity: Utc::now(),
+            swarm_manager: None,
+            swarm_client: Arc::new(SwarmClient),
+            internal_tx: None,
         }
     }
 
-    pub async fn run(
-        scheduler_state: Arc<RwLock<Self>>,
+    #[instrument(skip(self, event_rx), name = "ANK_Scheduler_Loop")]
+    pub async fn start(
+        mut self,
         mut event_rx: mpsc::Receiver<SchedulerEvent>,
-    ) {
-        info!("Cognitive Scheduler started.");
+        internal_tx: mpsc::Sender<SchedulerEvent>,
+    ) -> anyhow::Result<()> {
+        self.internal_tx = Some(internal_tx);
+        info!("Cognitive Scheduler engine initialized.");
 
         loop {
             tokio::select! {
-                // Escuchar nuevos eventos (Nuevos procesos, syscalls terminadas)
+                // Prioridad 1: Procesar eventos externos
                 Some(event) = event_rx.recv() => {
-                    let mut state = scheduler_state.write().await;
-                    match event {
-                        SchedulerEvent::RegisterProcess(mut pcb) => {
-                            info!("New process registered: {} (Priority: {})", pcb.pid, pcb.priority);
-                            pcb.state = ProcessState::Ready;
-                            
-                            // Lógica de Preemption simplificada: 
-                            // Si llega algo de prioridad 10 y lo que corre es menor, marcar para interrupción
-                            if pcb.priority >= 10 {
-                                if let Some(ref running) = state.current_running {
-                                    if running.priority < 10 {
-                                        warn!("High priority preemption triggered by {}", pcb.pid);
-                                        // Aquí se enviaría una señal al cHAL para detener la inferencia actual
-                                    }
-                                }
-                            }
-                            state.ready_queue.push(pcb);
-                        }
-                        SchedulerEvent::SyscallCompleted { pid, result } => {
-                            if let Some(mut pcb) = state.waiting_queue.remove(&pid) {
-                                info!("Syscall completed for {}. Moving back to Ready.", pid);
-                                pcb.registers.temp_vars.insert("last_syscall_res".to_string(), result);
-                                pcb.state = ProcessState::Ready;
-                                state.ready_queue.push(pcb);
-                            }
-                        }
-                        SchedulerEvent::ProcessTerminated { pid, success } => {
-                            info!("Process {} terminated (Success: {})", pid, success);
-                            if let Some(ref running) = state.current_running {
-                                if running.pid == pid {
-                                    state.current_running = None;
-                                }
-                            }
-                        }
-                    }
+                    self.handle_event(event).await.context("Error handling scheduler event")?;
                 }
 
-                // Si no hay eventos, y hay procesos listos, y la "CPU" está libre, despachar
+                // Prioridad 2: Ciclo de despacho (Reconcile)
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
-                    let mut state = scheduler_state.write().await;
-                    if state.current_running.is_none() && !state.ready_queue.is_empty() {
-                        if let Some(mut pcb) = state.ready_queue.pop() {
-                            info!("Dispatching process: {} (Priority: {})", pcb.pid, pcb.priority);
-                            pcb.state = ProcessState::Running;
-                            state.current_running = Some(pcb);
-                            
-                            // TODO: Llamar al dispatch_to_cHAL(pcb) en Q1-Q2 2026
+                    self.reconcile().await.context("Error during state reconciliation")?;
+                }
+            }
+        }
+    }
+
+    #[instrument(skip(self), name = "ANK_Handle_Event")]
+    async fn handle_event(&mut self, event: SchedulerEvent) -> anyhow::Result<()> {
+        self.last_activity = Utc::now();
+        match event {
+            SchedulerEvent::ScheduleTask(pcb_box) => {
+                info!(pid = %pcb_box.pid, prio = pcb_box.priority, "Task queued (ScheduleTask).");
+                let mut pcb = *pcb_box;
+                pcb.state = ProcessState::Ready;
+                self.process_table.insert(pcb.pid.clone(), pcb.clone());
+                self.ready_queue.push(pcb);
+            }
+            SchedulerEvent::DispatchLocal(pcb_box) => {
+                info!(pid = %pcb_box.pid, prio = pcb_box.priority, "Task queued (DispatchLocal).");
+                let mut pcb = *pcb_box;
+                pcb.state = ProcessState::Ready;
+                self.process_table.insert(pcb.pid.clone(), pcb.clone());
+                self.ready_queue.push(pcb);
+            }
+            SchedulerEvent::SyscallCompleted { pid, result } => {
+                if let Some(mut pcb) = self.waiting_queue.remove(&pid) {
+                    info!(pid = %pid, "Syscall returned result. Returning process to Ready.");
+                    pcb.registers
+                        .temp_vars
+                        .insert("last_syscall_result".to_string(), result);
+                    pcb.state = ProcessState::Ready;
+                    self.ready_queue.push(pcb);
+                }
+            }
+            SchedulerEvent::RemoteEvent(pid, remote_event) => {
+                info!(pid = %pid, "Received remote execution event from Swarm.");
+                // Extraemos el payload de Protobuf y disparamos lógica local
+                if let Some(payload) = remote_event.payload {
+                    match payload {
+                        ank_proto::v1::task_event::Payload::Output(result) => {
+                            info!(pid = %pid, "Remote process completed with output.");
+                            // Si el nodo remoto completó la tarea, lo reinyectamos simulando
+                            // una SyscallCompleted para que vuelva a la cola o notifique a DAG
+                            if let Some(pcb) = self.process_table.get_mut(&pid) {
+                                pcb.state = ProcessState::Completed;
+                                pcb.registers.temp_vars.insert("final_output".to_string(), result);
+                                // En una implementación real, aquí notificaríamos al GraphManager
+                            }
+                        }
+                        ank_proto::v1::task_event::Payload::Syscall(syscall) => {
+                            info!(pid = %pid, "Remote process requires Syscall executing on Host: {}", syscall.name);
+                        }
+                        _ => {
+                            info!(pid = %pid, "Ignored remote status payload.");
                         }
                     }
                 }
             }
+            SchedulerEvent::PreemptCurrent => {
+                if let Some(pid) = self.current_running.take() {
+                    warn!(pid = %pid, "Hard preemption triggered. Interrupting ALU.");
+                    // TODO: Señal de interrupción al cHAL
+                }
+            }
+            SchedulerEvent::TerminateProcess(pid) => {
+                info!(pid = %pid, "Manual process termination.");
+                self.process_table.remove(&pid);
+                self.waiting_queue.remove(&pid);
+                if self.current_running.as_ref() == Some(&pid) {
+                    self.current_running = None;
+                }
+            }
         }
+        Ok(())
+    }
+
+    /// Despacha procesos de la cola de Listos a la "CPU" (ALU/LLM) local o al Swarm si es complejo.
+    async fn reconcile(&mut self) -> anyhow::Result<()> {
+        if self.current_running.is_none() && !self.ready_queue.is_empty() {
+            if let Some(mut pcb) = self.ready_queue.pop() {
+                // LÓGICA DE TELEPORTACIÓN
+                if pcb.model_pref.is_complex() {
+                    if let Some(swarm) = &self.swarm_manager {
+                        let nodes = swarm.active_nodes.read().await;
+                        // Buscamos un nodo con Tier > 1 que esté Ready
+                        let target_node = nodes.values()
+                            .find(|n| n.hardware_tier > 1 && n.status == NodeStatus::Ready);
+
+                        if let Some(node) = target_node {
+                            info!(pid = %pcb.pid, target = %node.node_id, "High complexity detected. Delegating to Swarm.");
+                            
+                            let client = self.swarm_client.clone();
+                            let node_ip = node.ip_address.clone();
+                            let node_port = node.grpc_port;
+                            let recovery_tx = self.internal_tx.clone();
+                            let swarm_mgr_ref = swarm.clone();
+
+                            // Spawn de Teleportación para no bloquear el bucle del Scheduler
+                            tokio::spawn(async move {
+                                // Extraemos el canal de eventos de la instancia local si existe,
+                                // sino usamos un dummy channel como resiliencia.
+                                let event_tx = if let Some(tx) = &recovery_tx {
+                                    tx.clone()
+                                } else {
+                                    let (dummy_tx, _) = mpsc::channel(1);
+                                    dummy_tx
+                                };
+                                
+                                if let Err(e) = client.teleport(&node_ip, node_port, pcb.clone(), event_tx).await {
+                                    error!(pid = %pcb.pid, error = %e, "Teleportation failed. Initiating Fallback.");
+                                    
+                                    // Marcar nodo como sospechoso
+                                    {
+                                        let mut nodes = swarm_mgr_ref.active_nodes.write().await;
+                                        if let Some(meta) = nodes.values_mut().find(|n| n.ip_address == node_ip) {
+                                            meta.status = NodeStatus::Suspect;
+                                        }
+                                    }
+
+                                    // RESILIENCIA EXTREMA: Devolver el PCB a la cola local
+                                    if let Some(tx) = recovery_tx {
+                                        let _ = tx.send(SchedulerEvent::DispatchLocal(Box::new(pcb))).await;
+                                    }
+                                }
+                            });
+                            return Ok(()); // Despachado al Swarm (asíncronamente)
+                        }
+                    }
+                }
+
+                // FALLBACK O EJECUCIÓN SIMPLE: Despacho local
+                info!(pid = %pcb.pid, "Assigning process to local execution core.");
+                pcb.state = ProcessState::Running;
+                self.current_running = Some(pcb.pid.clone());
+                self.process_table.insert(pcb.pid.clone(), pcb);
+            }
+        }
+        Ok(())
+    }
+}
+
+pub type SharedScheduler = Arc<RwLock<CognitiveScheduler>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_priority_scheduling() {
+        let mut scheduler = CognitiveScheduler::new();
+
+        let p10 = PCB::new("task-high".into(), 10, "mock".into());
+        let p5a = PCB::new("task-low-1".into(), 5, "mock".into());
+        let p5b = PCB::new("task-low-2".into(), 5, "mock".into());
+
+        // Inyectamos fuera de orden
+        scheduler
+            .handle_event(SchedulerEvent::ScheduleTask(Box::new(p5a)))
+            .await
+            .unwrap();
+        scheduler
+            .handle_event(SchedulerEvent::ScheduleTask(Box::new(p10)))
+            .await
+            .unwrap();
+        scheduler
+            .handle_event(SchedulerEvent::ScheduleTask(Box::new(p5b)))
+            .await
+            .unwrap();
+
+        // Verificamos orden de salida
+        let first = scheduler.ready_queue.pop().unwrap();
+        assert_eq!(first.process_name, "task-high", "Prioridad 10 debe salir primero");
+
+        let second = scheduler.ready_queue.pop().unwrap();
+        assert_eq!(second.process_name, "task-low-1", "FCFS para prioridad 5 (1)");
+
+        let third = scheduler.ready_queue.pop().unwrap();
+        assert_eq!(third.process_name, "task-low-2", "FCFS para prioridad 5 (2)");
     }
 }

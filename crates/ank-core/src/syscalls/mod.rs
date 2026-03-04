@@ -1,3 +1,5 @@
+use crate::plugins::PluginManager;
+use crate::scribe::CommitMetadata;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
@@ -79,7 +81,7 @@ impl SyscallExecutor {
                     .plugin_manager
                     .execute_plugin(tenant_id, &plugin_name, &args_json)
                     .await
-                    .map_err(|e| SyscallError::PluginError(e.to_string()))?;
+                    .map_err(|e: crate::plugins::PluginError| SyscallError::PluginError(e.to_string()))?;
 
                 Ok(format!("[SYSTEM_RESULT: {}]", result))
             }
@@ -94,7 +96,7 @@ impl SyscallExecutor {
 
                 let content = tokio::fs::read_to_string(&full_path)
                     .await
-                    .map_err(|e| SyscallError::IOError(format!("Read failed for {}: {}", uri, e)))?;
+                    .map_err(|e: std::io::Error| SyscallError::IOError(format!("Read failed for {}: {}", uri, e)))?;
 
                 Ok(format!("[SYSTEM_RESULT: Content of {}]\n{}", uri, content))
             }
@@ -104,7 +106,7 @@ impl SyscallExecutor {
                 
                 self.scribe.write_and_commit(tenant_id, file_path, content.as_bytes(), metadata)
                     .await
-                    .map_err(|e| SyscallError::IOError(format!("Scribe write failed: {}", e)))?;
+                    .map_err(|e: crate::scribe::ScribeError| SyscallError::IOError(format!("Scribe write failed: {}", e)))?;
 
                 Ok(format!("[SYSTEM_RESULT: File {} written and committed to Git]", uri))
             }
@@ -115,7 +117,7 @@ impl SyscallExecutor {
     /// Delega en el PluginManager para mantener una única fuente de verdad sobre políticas de red.
     pub async fn fetch_url_safe(&self, url_str: &str) -> Result<String, SyscallError> {
         self.plugin_manager.fetch_url_safe(url_str).await
-            .map_err(|e| match e {
+            .map_err(|e: crate::plugins::PluginError| match e {
                 crate::plugins::PluginError::SecurityViolation(msg) => SyscallError::SecurityViolation(msg),
                 _ => SyscallError::IOError(e.to_string()),
             })

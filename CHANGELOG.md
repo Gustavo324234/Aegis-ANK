@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1] - 2026-03-04
+### Fixed
+- **[ANK-114] Identity Initialization & System Status Robustness**:
+    - **Robust Init Detection**: Refactored `MasterEnclave::is_initialized()` to verify `master_admin` table existence before querying, preventing false positives or errors on empty databases.
+    - **Explicit Status Reporting**: Updated `GetSystemStatus` in `AnkRpcServer` to return `SystemState::StateInitializing` (0) when the database is missing or uninitialized, enabling the Shell's setup flow.
+    - **Non-Blocking Interceptor**: Verified and documented that `auth_interceptor` permits unauthenticated `GetSystemStatus` calls, essential for the initial admin creation bootstrap.
+    - **Strict Admin Validation**: Enhanced `authenticate_master` to validate both username and password hash, ensuring `CreateTenant` and `ResetTenantPassword` are strictly reserved for the Master Admin.
+
 ## [1.1.0] - 2026-03-04
 ### Added
 - **[ANK-603] Identity & Tenant Management**:

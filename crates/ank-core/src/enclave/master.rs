@@ -36,8 +36,10 @@ impl MasterEnclave {
         conn.pragma_update(None, "key", master_key)
             .context("Failed to apply PRAGMA key to master database")?;
 
+        // Verificación básica de integridad y capacidad de desencriptación.
+        // Si el PRAGMA key falló o la DB está corrupta, esta consulta fallará.
         conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))
-            .context("Decryption failed: invalid master key or corrupted master database")?;
+            .context("Decryption failed: invalid master key or corrupted master database file")?;
 
         info!("Master Admin Enclave initialized successfully.");
 
@@ -80,11 +82,24 @@ impl MasterEnclave {
         format!("{:x}", hasher.finalize())
     }
 
-    /// Verifica si ya existe un master admin configurado
+    /// Verifica si ya existe un master admin configurado de forma robusta.
+    /// Devuelve false si la tabla no existe o si no hay registros.
     pub async fn is_initialized(&self) -> Result<bool> {
         let conn = self.connection.lock().await;
-        let mut stmt = conn.prepare("SELECT count(*) FROM master_admin")?;
-        let count: i64 = stmt.query_row([], |row| row.get(0))?;
+
+        // Primero verificamos que la tabla exista consultando sqlite_master.
+        // Si no existe (ej: DB acaba de ser creada pero init_schema no terminó), es false.
+        let table_exists: bool = conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='master_admin'",
+            [],
+            |_| Ok(true)
+        ).unwrap_or(false);
+
+        if !table_exists {
+            return Ok(false);
+        }
+
+        let count: i64 = conn.query_row("SELECT count(*) FROM master_admin", [], |row| row.get(0))?;
         Ok(count > 0)
     }
 
@@ -105,22 +120,24 @@ impl MasterEnclave {
         Ok(())
     }
 
-    /// Valida que el session_key proporcione matching real con el Master Admin password
-    pub async fn authenticate_master(&self, _username_or_token: &str, passphrase_or_session: &str) -> Result<bool> {
+    /// Valida que el session_key proporcione matching real con el Master Admin password.
+    /// Es vital validar tanto username como password_hash para identidad robusta.
+    pub async fn authenticate_master(&self, username: &str, passphrase_or_session: &str) -> Result<bool> {
         let conn = self.connection.lock().await;
-        let mut stmt = conn.prepare("SELECT password_hash FROM master_admin LIMIT 1")?;
         
-        let hash: Option<String> = stmt.query_row([], |row| row.get(0)).ok();
+        // Buscamos el hash del admin específico por su username
+        let mut stmt = conn.prepare("SELECT password_hash FROM master_admin WHERE username = ?1 LIMIT 1")?;
         
-        if let Some(real_hash) = hash {
-            // Nota: Podríamos aceptar la propia passphrase en texto plano (para logearse) o un session_key generado.
-            // Para el propósito de esta tarea (Admin Setup / Create Tenant gRPC), Citadel asume que el session_key
-            // de Master Admin ya ha sido validado, o que la passphrase recibida mapea.
-            // Vamos a validar si la contraseña proporcionada haseada coincide, o si es un "session_key" activo en memoria.
-            let input_hash = Self::hash_password(passphrase_or_session);
-            Ok(input_hash == real_hash)
-        } else {
-            Ok(false) // Not initialized
+        let hash_result: rusqlite::Result<String> = stmt.query_row([username], |row| row.get(0));
+        
+        match hash_result {
+            Ok(real_hash) => {
+                let input_hash = Self::hash_password(passphrase_or_session);
+                // Comparamos el hash de la entrada con el persistido
+                Ok(input_hash == real_hash)
+            },
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false), // Admin no encontrado
+            Err(e) => Err(anyhow::anyhow!("Database authentication error: {}", e)),
         }
     }
 

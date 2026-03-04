@@ -29,6 +29,10 @@ impl std::fmt::Debug for CitadelAuth {
     }
 }
 
+/// Interceptor de autenticación Citadel.
+/// Extrae la identidad del Tenant pero NO bloquea si faltan headers,
+/// delegando la decisión de seguridad a cada RPC individualmente. Esto es CRÍTICO
+/// para que GetSystemStatus pueda responder 0 (Initializing) a una Shell sin sesión.
 pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
     let metadata = req.metadata();
 
@@ -37,7 +41,7 @@ pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
             Ok(s) => s.to_string(),
             Err(_) => return Err(Status::unauthenticated("Invalid tenant_id format")),
         },
-        None => return Ok(req),
+        None => return Ok(req), // No bloquea, permite que la lógica del RPC decida
     };
 
     let session_key = match metadata.get("x-aegis-session-key") {
@@ -167,17 +171,21 @@ impl KernelService for AnkRpcServer {
         &self,
         request: Request<Empty>,
     ) -> Result<Response<SystemStatus>, Status> {
-        // Determinar estado basado en si el Master Admin está inicializado
-        let is_init = self.master_enclave.is_initialized().await
-            .map_err(|e| Status::internal(format!("DB Error: {}", e)))?;
+        // Determinar estado basado en si el Master Admin está inicializado.
+        // Si hay error en la DB (ej. borrada), asumimos false para permitir redirección al Setup.
+        let is_init = self.master_enclave.is_initialized().await.unwrap_or_else(|e| {
+            warn!("MasterEnclave check failed, reporting uninitialized: {}", e);
+            false
+        });
 
-        // Validation of Multi-Tenant context ONLY if localized
+        // Validación de contexto solo si el sistema se reporta operativo.
         let auth = request.extensions().get::<CitadelAuth>();
         
         if is_init && auth.is_none() {
-            return Err(Status::unauthenticated("Citadel Protocol context missing"));
+            return Err(Status::unauthenticated("Citadel Protocol context missing (System is Operational)"));
         }
         
+        // Reportamos explícitamente el valor acorde al enum (0: Initializing, 1: Operational)
         let state = if is_init {
             SystemState::StateOperational as i32
         } else {

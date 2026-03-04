@@ -1,10 +1,11 @@
 🗺️ ANK Project Tracking (Kanban Mode)
 Este archivo es la fuente de verdad del progreso del Aegis Neural Kernel. El programador debe mover los tickets de sección y actualizar las versiones según se complete el trabajo.
 
-### 🚀 VERSION 1.1.0 "IDENTITY CORE" - LATEST ✅
-El sistema de identidad y enclaves dinámicos ha sido estabilizado, permitiendo una gestión segura de múltiples Tenants y un Master Admin maestro.
+### 🚀 VERSION 1.1.1 "IDENTITY RECOVERY" - LATEST ✅
+El fallo crítico en la inicialización de identidad ha sido corregido, asegurando que el Kernel reporte correctamente el estado de configuración pendiente.
 
 🟩 DONE (Completado)
+- [ANK-114] Fix: Identity Initialization & GetSystemStatus robust reporting (v1.1.1)
 - [ANK-603] Identity & Tenant Management: Master Admin Enclave & Dynamic Ports (v1.1.0)
 - [ANK-113] Cold-Fix: Borrow Checker E0382 & Limpieza imports (v1.0.3)
 - [ANK-112] Cold-Fix: API Wasmtime & Mapeo Citadel (v1.0.2)

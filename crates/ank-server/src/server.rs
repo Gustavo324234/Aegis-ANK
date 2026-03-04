@@ -32,19 +32,21 @@ impl std::fmt::Debug for CitadelAuth {
 pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
     let metadata = req.metadata();
 
-    let tenant_id = metadata
-        .get("x-aegis-tenant-id")
-        .ok_or_else(|| Status::unauthenticated("Citadel Protocol: Missing x-aegis-tenant-id"))?
-        .to_str()
-        .map_err(|_| Status::unauthenticated("Invalid tenant_id format"))?
-        .to_string();
+    let tenant_id = match metadata.get("x-aegis-tenant-id") {
+        Some(v) => match v.to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => return Err(Status::unauthenticated("Invalid tenant_id format")),
+        },
+        None => return Ok(req),
+    };
 
-    let session_key = metadata
-        .get("x-aegis-session-key")
-        .ok_or_else(|| Status::unauthenticated("Citadel Protocol: Missing x-aegis-session-key"))?
-        .to_str()
-        .map_err(|_| Status::unauthenticated("Invalid session_key format"))?
-        .to_string();
+    let session_key = match metadata.get("x-aegis-session-key") {
+        Some(v) => match v.to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => return Err(Status::unauthenticated("Invalid session_key format")),
+        },
+        None => return Ok(req),
+    };
 
     let mut req = req;
     req.extensions_mut().insert(CitadelAuth {
@@ -165,15 +167,16 @@ impl KernelService for AnkRpcServer {
         &self,
         request: Request<Empty>,
     ) -> Result<Response<SystemStatus>, Status> {
-        // Validation of Multi-Tenant context
-        let _auth = request
-            .extensions()
-            .get::<CitadelAuth>()
-            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
-
         // Determinar estado basado en si el Master Admin está inicializado
         let is_init = self.master_enclave.is_initialized().await
             .map_err(|e| Status::internal(format!("DB Error: {}", e)))?;
+
+        // Validation of Multi-Tenant context ONLY if localized
+        let auth = request.extensions().get::<CitadelAuth>();
+        
+        if is_init && auth.is_none() {
+            return Err(Status::unauthenticated("Citadel Protocol context missing"));
+        }
         
         let state = if is_init {
             SystemState::StateOperational as i32

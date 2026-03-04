@@ -1,10 +1,11 @@
 🗺️ ANK Project Tracking (Kanban Mode)
 Este archivo es la fuente de verdad del progreso del Aegis Neural Kernel. El programador debe mover los tickets de sección y actualizar las versiones según se complete el trabajo.
 
-### 🚀 VERSION 1.0.0 "IMMORTAL CORE" - RELEASED ✅
-El sistema base del Aegis Neural Kernel está completado de forma integral, incluyendo Scheduler, cHAL, VCM, Swarm Discovery, Sandbox Wasm y el Protocolo Citadel.
+### 🚀 VERSION 1.1.0 "IDENTITY CORE" - LATEST ✅
+El sistema de identidad y enclaves dinámicos ha sido estabilizado, permitiendo una gestión segura de múltiples Tenants y un Master Admin maestro.
 
 🟩 DONE (Completado)
+- [ANK-603] Identity & Tenant Management: Master Admin Enclave & Dynamic Ports (v1.1.0)
 - [ANK-113] Cold-Fix: Borrow Checker E0382 & Limpieza imports (v1.0.3)
 - [ANK-112] Cold-Fix: API Wasmtime & Mapeo Citadel (v1.0.2)
 - [ANK-111] Repository Security & Ignore Policy (v1.0.1)

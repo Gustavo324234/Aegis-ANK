@@ -1,4 +1,4 @@
-use ank_core::{CognitiveScheduler, SchedulerEvent};
+use ank_core::{enclave::master::MasterEnclave, CognitiveScheduler, SchedulerEvent};
 use ank_proto::v1::kernel_service_server::KernelServiceServer;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -34,11 +34,16 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Instanciar el Master Enclave (DB administrativa)
+    // El 'root_key' en producción debería ser inyectado vía variable de entorno.
+    let root_key = std::env::var("AEGIS_ROOT_KEY").unwrap_or_else(|_| "default_root_key".to_string());
+    let master_enclave = MasterEnclave::open("admin.db", &root_key).await?;
+
     // Configuración e instanciación del servidor gRPC (0.0.0.0:50051 per req)
     let addr = "0.0.0.0:50051".parse()?;
     
     // Instanciar el servicio con la UI / Cliente Python apuntando acá
-    let ank_service = AnkRpcServer::new(scheduler_tx, Arc::clone(&event_broker));
+    let ank_service = AnkRpcServer::new(scheduler_tx, Arc::clone(&event_broker), master_enclave);
 
     // Aplicar Middleware de Autenticación (Citadel Protocol)
     let svc = KernelServiceServer::with_interceptor(

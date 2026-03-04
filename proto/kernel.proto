@@ -23,6 +23,16 @@ service KernelService {
   // Teleports a full process. The Worker adds it to its local Scheduler.
   // The stream returns real-time state changes (RUNNING, WAITING).
   rpc TeleportProcess (PCB) returns (stream TaskEvent);
+
+  // --- IDENTITY & TENANT MANAGEMENT ---
+  // Initializes the super admin if not yet configured
+  rpc InitializeMasterAdmin (AdminSetupRequest) returns (AdminSetupResponse);
+
+  // Generates a new tenant, assigns port and temporary passphrase
+  rpc CreateTenant (TenantCreateRequest) returns (TenantCreateResponse);
+
+  // Forces a password reset for a given tenant
+  rpc ResetTenantPassword (PasswordResetRequest) returns (Empty);
 }
 
 // --- MESSAGES ---
@@ -120,6 +130,11 @@ message ProcessList {
   repeated PCB processes = 1;
 }
 
+enum SystemState {
+  STATE_INITIALIZING = 0;
+  STATE_OPERATIONAL = 1;
+}
+
 message SystemStatus {
   float cpu_load = 1;
   float vram_allocated_mb = 2;
@@ -128,6 +143,36 @@ message SystemStatus {
   uint32 active_workers = 5;
   string uptime = 6;
   repeated string loaded_models = 7;
+  SystemState state = 8;
+}
+
+// --- ADMIN & TENANT MESSAGES ---
+
+message AdminSetupRequest {
+  string username = 1;
+  string passphrase = 2;
+}
+
+message AdminSetupResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message TenantCreateRequest {
+  string username = 1;
+}
+
+message TenantCreateResponse {
+  bool success = 1;
+  string tenant_id = 2;
+  string temporary_passphrase = 3;
+  uint32 network_port = 4;
+  string message = 5;
+}
+
+message PasswordResetRequest {
+  string tenant_id = 1;
+  string new_passphrase = 2;
 }
 
 message Empty {}

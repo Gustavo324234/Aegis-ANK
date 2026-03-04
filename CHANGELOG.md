@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0] - 2026-03-04
+### Added
+- **[ANK-603] Identity & Tenant Management**:
+    - **Master Admin Enclave**: Implemented `admin.db` with SQLCipher persistence and SHA-256 password hashing for robust Super Admin management.
+    - **Tenant Orchestration**: Added gRPC endpoints `InitializeMasterAdmin`, `CreateTenant`, and `ResetTenantPassword` in `KernelService`.
+    - **Dynamic Port Assignment**: Automated network port allocation for new UI/BFF tenants, mapped directly in the internal SQLite store.
+    - **Kernel System State**: Added `SystemState` enum to telemetry (`GetSystemStatus`) to represent `INITIALIZING` or `OPERATIONAL` status natively.
+    - **Citadel Shielding**: All tenant modification paths are fortified behind `SessionKey` verifications matching the Master Enclave payload.
+
 ## [1.0.3] - 2026-03-04
 ### Fixed
 - **[ANK-113] Server Borrow Order & Import Cleanup**:

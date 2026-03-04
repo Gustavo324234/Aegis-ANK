@@ -1,8 +1,9 @@
-use ank_core::{SchedulerEvent, PCB as CorePCB};
+use ank_core::{enclave::master::MasterEnclave, SchedulerEvent, PCB as CorePCB};
 use ank_proto::v1::kernel_service_server::KernelService;
 use ank_proto::v1::{
-    Empty, Priority as ProtoPriority, ProcessList, SystemStatus, TaskEvent, TaskRequest,
-    TaskResponse, TaskSubscription, Pcb as ProtoPcb,
+    AdminSetupRequest, AdminSetupResponse, Empty, PasswordResetRequest, Priority as ProtoPriority,
+    ProcessList, SystemState, SystemStatus, TaskEvent, TaskRequest, TaskResponse,
+    TaskSubscription, TenantCreateRequest, TenantCreateResponse, Pcb as ProtoPcb,
 };
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -57,16 +58,19 @@ pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
 pub struct AnkRpcServer {
     scheduler_tx: mpsc::Sender<SchedulerEvent>,
     event_broker: Arc<RwLock<HashMap<String, mpsc::Sender<TaskEvent>>>>,
+    master_enclave: MasterEnclave,
 }
 
 impl AnkRpcServer {
     pub fn new(
         scheduler_tx: mpsc::Sender<SchedulerEvent>,
         event_broker: Arc<RwLock<HashMap<String, mpsc::Sender<TaskEvent>>>>,
+        master_enclave: MasterEnclave,
     ) -> Self {
         Self {
             scheduler_tx,
             event_broker,
+            master_enclave,
         }
     }
 }
@@ -167,6 +171,16 @@ impl KernelService for AnkRpcServer {
             .get::<CitadelAuth>()
             .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
 
+        // Determinar estado basado en si el Master Admin está inicializado
+        let is_init = self.master_enclave.is_initialized().await
+            .map_err(|e| Status::internal(format!("DB Error: {}", e)))?;
+        
+        let state = if is_init {
+            SystemState::StateOperational as i32
+        } else {
+            SystemState::StateInitializing as i32
+        };
+
         // En esta fase, devolvemos valores mockeados o telemetría básica
         Ok(Response::new(SystemStatus {
             cpu_load: 0.15,
@@ -176,6 +190,7 @@ impl KernelService for AnkRpcServer {
             active_workers: 1,
             uptime: "00:01:00".to_string(),
             loaded_models: vec!["Llama-3-8B-Instruct".to_string()],
+            state,
         }))
     }
 
@@ -250,5 +265,85 @@ impl KernelService for AnkRpcServer {
 
         let stream = ReceiverStream::new(rx).map(Ok);
         Ok(Response::new(Box::pin(stream) as Self::TeleportProcessStream))
+    }
+
+    async fn initialize_master_admin(
+        &self,
+        request: Request<AdminSetupRequest>,
+    ) -> Result<Response<AdminSetupResponse>, Status> {
+        let req = request.into_inner();
+
+        match self.master_enclave.initialize_master(&req.username, &req.passphrase).await {
+            Ok(_) => Ok(Response::new(AdminSetupResponse {
+                success: true,
+                message: "Master Admin successfully initialized".to_string(),
+            })),
+            Err(e) => Err(Status::already_exists(e.to_string())),
+        }
+    }
+
+    async fn create_tenant(
+        &self,
+        request: Request<TenantCreateRequest>,
+    ) -> Result<Response<TenantCreateResponse>, Status> {
+        let auth = request
+            .extensions()
+            .get::<CitadelAuth>()
+            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
+        // Validar que la request venga del root
+        let is_authed = self.master_enclave
+            .authenticate_master(&auth.tenant_id, &auth.session_key)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        if !is_authed {
+            return Err(Status::permission_denied("Only Master Admin can create tenants"));
+        }
+
+        let req = request.into_inner();
+        
+        match self.master_enclave.create_tenant(&req.username).await {
+            Ok((port, pass)) => Ok(Response::new(TenantCreateResponse {
+                success: true,
+                tenant_id: req.username,
+                temporary_passphrase: pass,
+                network_port: port,
+                message: "Tenant created".to_string(),
+            })),
+            Err(e) => Err(Status::internal(format!("Failed to create tenant: {}", e))),
+        }
+    }
+
+    async fn reset_tenant_password(
+        &self,
+        request: Request<PasswordResetRequest>,
+    ) -> Result<Response<Empty>, Status> {
+        let auth = request
+            .extensions()
+            .get::<CitadelAuth>()
+            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
+        // Validar que sea un Master Admin autorizado o el propio usuario reseteando su password?
+        // En Citadel, normalmente un Master Admin o un servicio de recu puede forzarlo.
+        let is_master = self.master_enclave
+            .authenticate_master(&auth.tenant_id, &auth.session_key)
+            .await
+            .unwrap_or(false);
+
+        let req = request.into_inner();
+
+        // Para simplificar, requerimos Master o que el propio usuario provea auth validado del tenant.
+        // Asumimos root por ahora.
+        if !is_master && auth.tenant_id != req.tenant_id {
+            return Err(Status::permission_denied("No permission to reset this tenant password"));
+        }
+
+        self.master_enclave
+            .reset_tenant_password(&req.tenant_id, &req.new_passphrase)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(Empty {}))
     }
 }

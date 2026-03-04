@@ -3,6 +3,8 @@ use rusqlite::Connection;
 use std::path::Path;
 use tracing::{info, error};
 
+pub mod master;
+
 /// --- TENANT DB (SECURE ENCLAVE) ---
 /// Gestiona una base de datos SQLite encriptada con SQLCipher por cada tenant.
 pub struct TenantDB {

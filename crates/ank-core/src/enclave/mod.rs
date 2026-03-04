@@ -28,9 +28,8 @@ impl TenantDB {
             .with_context(|| format!("Failed to open database at {}", db_path))?;
 
         // 1. Configurar la llave de encriptación (SQLCipher)
-        // Usamos execute en lugar de pragma_set porque el usuario pidió específicamente PRAGMA key.
-        // Nota: session_key debe ser tratada con cuidado (Zero-Knowledge)
-        conn.execute(&format!("PRAGMA key = '{}';", session_key), [])
+        // PRAGMA key requiere ser la primera sentencia y no debe retornar resultados.
+        conn.pragma_update(None, "key", session_key)
             .context("Failed to apply PRAGMA key for encryption")?;
 
         // 2. Verificar la integridad (Si la llave es incorrecta, cualquier consulta fallará aquí)
@@ -108,14 +107,14 @@ mod tests {
         
         {
             let conn = Connection::open(&db_path).unwrap();
-            conn.execute(&format!("PRAGMA key = '{}';", correct_key), []).unwrap();
+            conn.pragma_update(None, "key", correct_key).unwrap();
             conn.execute("CREATE TABLE test (id INTEGER)", []).unwrap();
             conn.execute("INSERT INTO test VALUES (1)", []).unwrap();
         }
 
         // 2. Intentar abrir con la llave incorrectA y verificar fallo de desencriptación
         let conn_fail = Connection::open(&db_path).unwrap();
-        conn_fail.execute(&format!("PRAGMA key = '{}';", wrong_key), []).unwrap();
+        conn_fail.pragma_update(None, "key", wrong_key).unwrap();
         
         // SQLCipher fallará aquí (file is not a database)
         let result = conn_fail.query_row("SELECT count(*) FROM test", [], |_| Ok(()));

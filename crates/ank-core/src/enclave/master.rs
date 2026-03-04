@@ -31,9 +31,9 @@ impl MasterEnclave {
         let conn = Connection::open(db_path)
             .with_context(|| format!("Failed to open master database at {}", db_path))?;
 
-        // Aplicamos la pragma key. El sistema Aegis pasará una llave estática configurada en variables de entorno,
-        // o generada en runtime para encriptar la propia BD maestra si se desea (o un string fijo en este MVP)
-        conn.execute(&format!("PRAGMA key = '{}';", master_key), [])
+        // Aplicamos la llave. El sistema Aegis pasará una llave estática configurada en variables de entorno,
+        // o generada en runtime para encriptar la propia BD maestra si se desea.
+        conn.pragma_update(None, "key", master_key)
             .context("Failed to apply PRAGMA key to master database")?;
 
         conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))

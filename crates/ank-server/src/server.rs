@@ -289,7 +289,10 @@ impl KernelService for AnkRpcServer {
         let auth = request
             .extensions()
             .get::<CitadelAuth>()
+            .cloned() // Clonamos inmediatamente para desligar de la vida de request
             .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
+        let req = request.into_inner();
 
         // Validar que la request venga del root
         let is_authed = self.master_enclave
@@ -300,8 +303,6 @@ impl KernelService for AnkRpcServer {
         if !is_authed {
             return Err(Status::permission_denied("Only Master Admin can create tenants"));
         }
-
-        let req = request.into_inner();
         
         match self.master_enclave.create_tenant(&req.username).await {
             Ok((port, pass)) => Ok(Response::new(TenantCreateResponse {
@@ -322,7 +323,10 @@ impl KernelService for AnkRpcServer {
         let auth = request
             .extensions()
             .get::<CitadelAuth>()
+            .cloned() // Clonamos inmediatamente para desligar de la vida de request
             .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
+        let req = request.into_inner();
 
         // Validar que sea un Master Admin autorizado o el propio usuario reseteando su password?
         // En Citadel, normalmente un Master Admin o un servicio de recu puede forzarlo.
@@ -330,8 +334,6 @@ impl KernelService for AnkRpcServer {
             .authenticate_master(&auth.tenant_id, &auth.session_key)
             .await
             .unwrap_or(false);
-
-        let req = request.into_inner();
 
         // Para simplificar, requerimos Master o que el propio usuario provea auth validado del tenant.
         // Asumimos root por ahora.

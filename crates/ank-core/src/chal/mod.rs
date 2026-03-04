@@ -1,13 +1,13 @@
 pub mod drivers;
+use crate::plugins::PluginManager;
 use crate::scheduler::{ModelPreference, SharedPCB};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio_stream::Stream;
 use tracing::info;
-use crate::plugins::PluginManager;
-use std::sync::Arc;
 
 /// --- SYSTEM PROMPT CONSTANTS ---
 pub const SYSTEM_PROMPT_MASTER: &str = r#"

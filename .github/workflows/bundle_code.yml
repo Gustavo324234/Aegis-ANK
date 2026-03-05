@@ -1,0 +1,52 @@
+name: Aegis Code Bundler
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  bundle-code:
+    name: Create Code Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Generate Code Document
+        run: |
+          # File to be generated
+          OUTPUT="AegisAnkCode.txt"
+          
+          echo "--- INITIALIZING AEGISONK CODE DOCUMENT ---" > "$OUTPUT"
+          echo "Generated on: $(date)" >> "$OUTPUT"
+          echo "Project: Aegis Neural Kernel (ANK)" >> "$OUTPUT"
+          echo "------------------------------------------" >> "$OUTPUT"
+          echo "" >> "$OUTPUT"
+
+          # Find relevant files: .rs, .toml, .md, .proto
+          # Exclude non-relevant directories: target, .git, .agents, .gemini
+          find . -type f \
+            \( -name "*.rs" -o -name "*.toml" -o -name "*.md" -o -name "*.proto" \) \
+            -not -path "*/.git/*" \
+            -not -path "*/target/*" \
+            -not -path "*/.agents/*" \
+            -not -path "*/.gemini/*" \
+            -not -name "$OUTPUT" \
+            -print0 | while IFS= read -r -d '' file; do
+              echo "Bundling: $file"
+              echo "================================================================================" >> "$OUTPUT"
+              echo "FILE: $file" >> "$OUTPUT"
+              echo "================================================================================" >> "$OUTPUT"
+              cat "$file" >> "$OUTPUT"
+              echo "" >> "$OUTPUT"
+              echo "--- EOF: $file ---" >> "$OUTPUT"
+              echo "" >> "$OUTPUT"
+            done
+
+      - name: Upload Code Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AegisAnkCode
+          path: AegisAnkCode.txt
+          retention-days: 5

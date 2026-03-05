@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.2] - 2026-03-05
+### Added
+- **[ANK-115] Workflow: GitHub Action Code Bundler**:
+    - **Automated Bundling**: Created a GitHub Action workflow (`bundle_code.yml`) that traverses the repository and concatenates all relevant code (`.rs`, `.toml`, `.md`, `.proto`) into a single text file.
+    - **Artifact Generation**: The workflow generates an artifact named `AegisAnkCode` containing the `AegisAnkCode.txt` bundle, optimized for LLM context ingestion.
+    - **Filter Logic**: Implemented exclusion of `target/`, `.git/`, `.agents/`, and other non-source directories to maintain a clean and relevant context.
+    - **Manual Trigger**: Added `workflow_dispatch` support to allow manual execution from the GitHub Actions tab.
+
 ## [1.1.1] - 2026-03-04
 ### Fixed
 - **[ANK-114] Identity Initialization & System Status Robustness**:

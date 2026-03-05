@@ -34,7 +34,7 @@ El fallo crítico en la inicialización de identidad ha sido corregido, aseguran
 - [ANK-101] Definición del Contrato Protobuf (v0.4.0)
 
  IN PROGRESS (En Desarrollo)
-- Ninguno (Fase de Estabilización y Despliegue)
+- [ANK-115] Workflow: GitHub Action Code Bundler (v1.1.2)
 
 🟥 TO DO (Pendiente)
 - [ANK-110] Optimización de Inferencia en Hardware Dual (NVIDIA + Coral)

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0] - 2026-03-06
+### Added
+- **[ANK-125] Siren Protocol TTS (Voz Zero-Blocking)**:
+    - **Contrato Siren Actualizado**: Modificación de `siren.proto` para añadir `tts_audio_chunk` y `sample_rate` al `SirenEvent`, unificando telemetría y voice streaming.
+    - **Acumulador de Oraciones Matemático**: Implementación de `SentenceAccumulator` que bufferiza los tokens del LLM a máxima velocidad y aplica una partición heurística por oraciones (`.`, `?`, `!`, `\n`) antes de pasarlos a síntesis.
+    - **Pipeline TTS Asíncrono**: Creación del Worker TTS en `spawn_blocking` con un canal concurrente MPSC que escucha las oraciones recolectadas y emite un flujo ininterrumpido a `SirenStream`, separando al LLM del costo de inferencia de audio.
+    - **Intercepción y Multiplexión de UI**: Refactorizado de la inyección de eventos para que el `SentenceAccumulator` escuche al LLM de fondo en paralelo con el usuario leyendo visualmente desde The Orb sin bloqueos cruzados.
+
 ## [1.4.0] - 2026-03-06
 ### Added
 - **[ANK-131] Aegis Admin CLI (Terminal Interface)**:

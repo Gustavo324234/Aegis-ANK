@@ -14,9 +14,11 @@ message AudioChunk {
 }
 
 message SirenEvent {
-  string event_type = 1; // "VAD_START", "VAD_END", "ERROR"
+  string event_type = 1; // "VAD_START", "VAD_END", "ERROR", "TTS_AUDIO"
   string message = 2;
   uint64 processed_sequence_number = 3;
+  bytes tts_audio_chunk = 4;
+  uint32 sample_rate = 5;
 }
 
 service SirenService {

@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Servicio Siren
-    let siren_impl = ank_server::siren::AnkSirenService::new(scheduler_tx.clone())?;
+    let siren_impl = ank_server::siren::AnkSirenService::new(scheduler_tx.clone(), Arc::clone(&event_broker))?;
     let siren_svc = ank_proto::v1::siren::siren_service_server::SirenServiceServer::with_interceptor(
         siren_impl,
         ank_server::server::auth_interceptor,

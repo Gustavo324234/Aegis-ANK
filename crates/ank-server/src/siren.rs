@@ -17,13 +17,20 @@ enum VadState {
     Speech,
 }
 
+use std::collections::HashMap;
+use tokio::sync::RwLock;
+
 pub struct AnkSirenService {
     scheduler_tx: mpsc::Sender<SchedulerEvent>,
     whisper_ctx: Arc<WhisperContext>,
+    event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<ank_proto::v1::TaskEvent>>>>>,
 }
 
 impl AnkSirenService {
-    pub fn new(scheduler_tx: mpsc::Sender<SchedulerEvent>) -> anyhow::Result<Self> {
+    pub fn new(
+        scheduler_tx: mpsc::Sender<SchedulerEvent>,
+        event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<ank_proto::v1::TaskEvent>>>>>,
+    ) -> anyhow::Result<Self> {
         // Load Whisper Model - GGUF Base as per ANK-124
         // Logic SRE: Si el modelo no está, fallamos al arranque para evitar fallos silenciosos en producción
         let model_path = std::env::var("AEGIS_WHISPER_MODEL").unwrap_or_else(|_| "ggml-base.bin".to_string());
@@ -35,6 +42,7 @@ impl AnkSirenService {
         Ok(Self {
             scheduler_tx,
             whisper_ctx: Arc::new(ctx),
+            event_broker,
         })
     }
 }
@@ -83,6 +91,7 @@ impl SirenService for AnkSirenService {
         let tx_events_worker = tx_events.clone();
         let whisper_ctx = self.whisper_ctx.clone();
         let scheduler_tx = self.scheduler_tx.clone();
+        let event_broker = self.event_broker.clone();
         
         tokio::spawn(async move {
             let mut vad = Vad::new_with_config(VadConfig::VeryAggressive);
@@ -120,6 +129,8 @@ impl SirenService for AnkSirenService {
                                     event_type: "VAD_START".to_string(),
                                     message: "Speaking...".to_string(),
                                     processed_sequence_number: chunk.sequence_number,
+                                    tts_audio_chunk: vec![],
+                                    sample_rate: 0,
                                 })).await;
                             }
                         }
@@ -137,6 +148,8 @@ impl SirenService for AnkSirenService {
                                         event_type: "VAD_END".to_string(),
                                         message: "Processing voice...".to_string(),
                                         processed_sequence_number: chunk.sequence_number,
+                                        tts_audio_chunk: vec![],
+                                        sample_rate: 0,
                                     })).await;
 
                                     // ANK-124: Offload STT to blocking thread
@@ -146,12 +159,15 @@ impl SirenService for AnkSirenService {
                                     let auth_clone = auth.clone();
                                     let tx_events_stt = tx_events_worker.clone();
                                     let seq = chunk.sequence_number;
+                                    let event_broker_clone = event_broker.clone();
 
                                     tokio::task::spawn_blocking(move || {
                                         let _ = tx_events_stt.try_send(Ok(SirenEvent {
                                             event_type: "STT_START".to_string(),
                                             message: "Transcribing...".to_string(),
                                             processed_sequence_number: seq,
+                                            tts_audio_chunk: vec![],
+                                            sample_rate: 0,
                                         }));
 
                                         let mut state = ctx_clone.create_state().expect("Failed to create Whisper state");
@@ -167,6 +183,8 @@ impl SirenService for AnkSirenService {
                                                 event_type: "STT_ERROR".to_string(),
                                                 message: format!("STT Error: {:?}", e),
                                                 processed_sequence_number: seq,
+                                                tts_audio_chunk: vec![],
+                                                sample_rate: 0,
                                             }));
                                             return;
                                         }
@@ -206,7 +224,45 @@ impl SirenService for AnkSirenService {
                                             event_type: "STT_DONE".to_string(),
                                             message: message_json,
                                             processed_sequence_number: seq,
+                                            tts_audio_chunk: vec![],
+                                            sample_rate: 0,
                                         }));
+
+                                        let (tx_task, mut rx_task) = tokio::sync::mpsc::channel(100);
+                                        let broker_clone = event_broker_clone.clone();
+                                        let pid_for_broker = pid_clone.clone();
+                                        let siren_tx_for_tts = tx_events_stt.clone();
+
+                                        tokio::spawn(async move {
+                                            {
+                                                let mut broker = broker_clone.write().await;
+                                                broker.entry(pid_for_broker).or_insert_with(Vec::new).push(tx_task);
+                                            }
+
+                                            let (tts_tx, rx_tts) = tokio::sync::mpsc::channel(100);
+                                            crate::tts::spawn_tts_worker(rx_tts, siren_tx_for_tts, seq);
+                                            
+                                            let mut accumulator = crate::tts::SentenceAccumulator::new(tts_tx);
+
+                                            while let Some(task_event) = rx_task.recv().await {
+                                                if let Some(payload) = task_event.payload {
+                                                    match payload {
+                                                        ank_proto::v1::task_event::Payload::Thought(thought) => {
+                                                            accumulator.push_token(&thought).await;
+                                                        }
+                                                        ank_proto::v1::task_event::Payload::StatusUpdate(update) => {
+                                                            if update.state == ank_proto::v1::ProcessState::StateCompleted as i32 
+                                                                || update.state == ank_proto::v1::ProcessState::StateTerminated as i32 {
+                                                                accumulator.flush().await;
+                                                                break;
+                                                            }
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                        });
+
                                     });
                                 }
                             } else {

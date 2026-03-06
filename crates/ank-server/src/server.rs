@@ -63,14 +63,14 @@ pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
 
 pub struct AnkRpcServer {
     scheduler_tx: mpsc::Sender<SchedulerEvent>,
-    event_broker: Arc<RwLock<HashMap<String, mpsc::Sender<TaskEvent>>>>,
+    event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<TaskEvent>>>>>,
     master_enclave: MasterEnclave,
 }
 
 impl AnkRpcServer {
     pub fn new(
         scheduler_tx: mpsc::Sender<SchedulerEvent>,
-        event_broker: Arc<RwLock<HashMap<String, mpsc::Sender<TaskEvent>>>>,
+        event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<TaskEvent>>>>>,
         master_enclave: MasterEnclave,
     ) -> Self {
         Self {
@@ -160,7 +160,7 @@ impl KernelService for AnkRpcServer {
 
         {
             let mut broker = self.event_broker.write().await;
-            broker.insert(pid.clone(), tx);
+            broker.entry(pid.clone()).or_insert_with(Vec::new).push(tx);
         }
 
         let stream = ReceiverStream::new(rx).map(Ok);
@@ -305,10 +305,10 @@ impl KernelService for AnkRpcServer {
         core_pcb.inlined_context = pcb.inlined_context;
 
         // Suscribirse a eventos ANTES de enviar al scheduler para no perder nada
-        let (tx, rx) = mpsc::channel(100);
+        let (tx, _rx) = mpsc::channel(100);
         {
             let mut broker = self.event_broker.write().await;
-            broker.insert(pid.clone(), tx);
+            broker.entry(pid.clone()).or_insert_with(Vec::new).push(tx);
         }
 
         // Enviar al Scheduler

@@ -48,7 +48,7 @@ use crate::scribe::ScribeManager;
 /// --- SYSCALL EXECUTOR ---
 /// El ejecutor de Syscalls es el puente entre el parser y los subsistemas del Kernel.
 pub struct SyscallExecutor {
-    plugin_manager: Arc<PluginManager>,
+    plugin_manager: Arc<tokio::sync::RwLock<PluginManager>>,
     vcm: Arc<VirtualContextManager>,
     scribe: Arc<ScribeManager>,
     swap: Arc<LanceSwapManager>,
@@ -56,7 +56,7 @@ pub struct SyscallExecutor {
 
 impl SyscallExecutor {
     pub fn new(
-        plugin_manager: Arc<PluginManager>,
+        plugin_manager: Arc<tokio::sync::RwLock<PluginManager>>,
         vcm: Arc<VirtualContextManager>,
         scribe: Arc<ScribeManager>,
         swap: Arc<LanceSwapManager>,
@@ -77,8 +77,8 @@ impl SyscallExecutor {
                 plugin_name,
                 args_json,
             } => {
-                let result = self
-                    .plugin_manager
+                let pm = self.plugin_manager.read().await;
+                let result = pm
                     .execute_plugin(tenant_id, &plugin_name, &args_json)
                     .await
                     .map_err(|e: crate::plugins::PluginError| SyscallError::PluginError(e.to_string()))?;
@@ -116,7 +116,8 @@ impl SyscallExecutor {
     /// Implementación de seguridad SRE para peticiones HTTP.
     /// Delega en el PluginManager para mantener una única fuente de verdad sobre políticas de red.
     pub async fn fetch_url_safe(&self, url_str: &str) -> Result<String, SyscallError> {
-        self.plugin_manager.fetch_url_safe(url_str).await
+        let pm = self.plugin_manager.read().await;
+        pm.fetch_url_safe(url_str).await
             .map_err(|e: crate::plugins::PluginError| match e {
                 crate::plugins::PluginError::SecurityViolation(msg) => SyscallError::SecurityViolation(msg),
                 _ => SyscallError::IOError(e.to_string()),
@@ -288,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_syscall_execution_format() {
-        let manager = Arc::new(PluginManager::new().unwrap());
+        let manager = Arc::new(tokio::sync::RwLock::new(PluginManager::new().unwrap()));
         let vcm = Arc::new(VirtualContextManager::new());
         let scribe = Arc::new(ScribeManager::new("./users_test"));
         let swap = Arc::new(LanceSwapManager::new("./swap_test"));
@@ -308,7 +309,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ssrf_guard_blocking() {
-        let manager = Arc::new(PluginManager::new().unwrap());
+        let manager = Arc::new(tokio::sync::RwLock::new(PluginManager::new().unwrap()));
         let vcm = Arc::new(VirtualContextManager::new());
         let scribe = Arc::new(ScribeManager::new("./users_test"));
         let swap = Arc::new(LanceSwapManager::new("./swap_test"));

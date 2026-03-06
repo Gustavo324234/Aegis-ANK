@@ -6,6 +6,8 @@ use wasmtime_wasi::pipe::{MemoryInputPipe, MemoryOutputPipe};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
 use tracing::info;
 
+pub mod watcher;
+
 /// --- PLUGIN ERROR SYSTEM ---
 #[derive(Error, Debug)]
 pub enum PluginError {
@@ -104,6 +106,53 @@ impl PluginManager {
             linker,
             plugins: HashMap::new(),
         })
+    }
+
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    pub async fn reload_plugin_module(&mut self, path: &str, module: Module) -> Result<(), PluginError> {
+        let name = Path::new(path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| PluginError::IOError("Invalid plugin path".to_string()))?
+            .to_string();
+
+        let initial_metadata = PluginMetadata {
+            name: name.clone(),
+            description: "Loading...".to_string(),
+            version: "1.0.0".to_string(),
+            author: "Loading...".to_string(),
+            parameter_example: "{}".to_string(),
+        };
+
+        self.plugins.insert(name.clone(), Plugin { metadata: initial_metadata, module });
+
+        let metadata_input = r#"{"action": "get_metadata"}"#;
+        match self.execute_plugin("system", &name, metadata_input).await {
+            Ok(json_out) => {
+                if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&json_out) {
+                    if let Some(data) = resp.get("data").and_then(|d| d.as_object()) {
+                        let final_metadata = PluginMetadata {
+                            name: name.clone(),
+                            description: data.get("description").and_then(|v| v.as_str()).unwrap_or("No description").to_string(),
+                            version: data.get("version").and_then(|v| v.as_str()).unwrap_or("1.0.0").to_string(),
+                            author: data.get("author").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
+                            parameter_example: data.get("example_json").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string()),
+                        };
+                        
+                        if let Some(p) = self.plugins.get_mut(&name) {
+                            p.metadata = final_metadata;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to auto-discover plugin {}: {}", name, e);
+            }
+        }
+        Ok(())
     }
 
     /// Carga un binario .wasm del disco, lo compila y lo cachea. Extrae metadatos dinámicamente.

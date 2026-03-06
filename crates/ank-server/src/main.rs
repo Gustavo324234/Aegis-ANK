@@ -1,4 +1,6 @@
 use ank_core::{enclave::master::MasterEnclave, CognitiveScheduler, SchedulerEvent};
+use ank_core::plugins::PluginManager;
+use ank_core::plugins::watcher::watch_plugins_dir;
 use ank_proto::v1::kernel_service_server::KernelServiceServer;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +27,17 @@ async fn main() -> anyhow::Result<()> {
 
     // Inicializar el Cognitive Scheduler principal
     let scheduler = CognitiveScheduler::new();
+
+    // Hot-reload Wasm Plugins Initialization
+    let plugin_manager = Arc::new(RwLock::new(PluginManager::new()?));
+    let pm_clone = Arc::clone(&plugin_manager);
+    
+    // Spawn zero-downtime hot-reload daemon
+    tokio::spawn(async move {
+        if let Err(e) = watch_plugins_dir("./plugins".to_string(), pm_clone).await {
+            tracing::error!("Failed to start Wasm Hot-Reload watcher: {}", e);
+        }
+    });
 
     info!("Iniciando hilo de ejecución principal (Cognitive Scheduler)...");
     tokio::spawn(async move {

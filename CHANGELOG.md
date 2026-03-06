@@ -8,6 +8,11 @@
     - **Procesos en Tiempo Real**: Refactor del `ListProcesses` gRPC endpoint en `ank-server` implementando el modelo Actor-Pattern (mpsc/oneshot channel) para interrogar atómicamente al `CognitiveScheduler` sin desarmar su inner loop, exponiendo de forma read-only el mapa de memoria de los PCBs activos.
     - **Streaming Cognitivo (`aegis run`)**: El subcomando orquesta eficientemente una llamada `SubmitTask` para capturar el PID seguido de una suscripción inmediata a `WatchTask`, emitiendo asincrónicamente el stream de tokens `Thought` a `stdout`.
     - **Zero-Panic SRE**: Hook asíncrono para interrupciones de sistema (`Ctrl+C`) capturado por `tokio::signal` abortando elegantemente el stream transitorio (`std::process::exit(0)`) antes de inducir *panics* por bindings internos (pipe rotos, abortos gRPC forzados).
+- **[ANK-802] Zero-Downtime Wasm Hot-Reloading**:
+    - **Demons Watcher**: Implementación asíncrona de un daemon sobre la ruta `./plugins` utilizando el crate `notify` y `notify-debouncer-mini`.
+    - **Atomic Hot-Swap Lock**: Refactor completo del `PluginManager` para soportar bloqueos de lectura/escritura concurrentes a través de `tokio::sync::RwLock`.
+    - **Zero-Panic Validation**: El Kernel ahora compila dinámicamente el `.wasm` *antes* de adquirir el `write().await` sobre el mapa de plugins, evitando la ralentización de inferencia general y atrapando builds corruptas de la comunidad sin sacrificar la versión actual cargada en RAM.
+    - **Auto-Discovery**: La recarga extrae metadatos y herramientas de la nueva funcionalidad automáticamente bajo el namespace de Tenant SRE `system`.
 
 ## [1.3.0] - 2026-03-06
 ### Added

@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use thiserror::Error;
 use tokio_stream::Stream;
 use tracing::info;
@@ -78,11 +79,11 @@ pub trait InferenceDriver: Send + Sync {
 /// --- COGNITIVE HAL (Hardware Abstraction Layer) ---
 pub struct CognitiveHAL {
     pub drivers: HashMap<String, Box<dyn InferenceDriver>>,
-    pub plugin_manager: Arc<PluginManager>,
+    pub plugin_manager: Arc<RwLock<PluginManager>>,
 }
 
 impl CognitiveHAL {
-    pub fn new(plugin_manager: Arc<PluginManager>) -> Self {
+    pub fn new(plugin_manager: Arc<RwLock<PluginManager>>) -> Self {
         Self {
             drivers: HashMap::new(),
             plugin_manager,
@@ -150,7 +151,7 @@ impl CognitiveHAL {
 
         // 3. Ensamblaje del "Master Prompt" (Prompt Injection)
         // Concatenamos: [Master Rules] + [Active Plugins] + [Process Instruction]
-        let tool_prompt = self.plugin_manager.get_available_tools_prompt();
+        let tool_prompt = self.plugin_manager.read().await.get_available_tools_prompt();
         
         let final_prompt = format!(
             "{}\n{}\n\n[USER_PROCESS_INSTRUCTION]\n{}",
@@ -206,7 +207,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hybrid_smart_routing_high_priority() {
-        let pm = Arc::new(PluginManager::new().unwrap());
+        let pm = Arc::new(RwLock::new(PluginManager::new().unwrap()));
         let mut hal = CognitiveHAL::new(pm);
 
         hal.register_driver(
@@ -241,7 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hybrid_smart_routing_low_priority() {
-        let pm = Arc::new(PluginManager::new().unwrap());
+        let pm = Arc::new(RwLock::new(PluginManager::new().unwrap()));
         let mut hal = CognitiveHAL::new(pm);
 
         hal.register_driver(

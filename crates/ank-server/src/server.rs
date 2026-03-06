@@ -3,7 +3,7 @@ use ank_proto::v1::kernel_service_server::KernelService;
 use ank_proto::v1::{
     AdminSetupRequest, AdminSetupResponse, Empty, PasswordResetRequest, Priority as ProtoPriority,
     ProcessList, SystemState, SystemStatus, TaskEvent, TaskRequest, TaskResponse,
-    TaskSubscription, TenantCreateRequest, TenantCreateResponse, Pcb as ProtoPcb,
+    TaskSubscription, TenantCreateRequest, TenantCreateResponse, Pcb as ProtoPcb, ProcessState as ProtoProcessState,
 };
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -210,15 +210,62 @@ impl KernelService for AnkRpcServer {
         request: Request<Empty>,
     ) -> Result<Response<ProcessList>, Status> {
         // Validation of Multi-Tenant context
-        let _auth = request
+        let auth = request
             .extensions()
             .get::<CitadelAuth>()
             .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
 
-        // Implementación pendiente del Scheduler
-        Ok(Response::new(ProcessList {
-            processes: Vec::new(),
-        }))
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        if let Err(e) = self.scheduler_tx.send(SchedulerEvent::ListProcesses(reply_tx)).await {
+            return Err(Status::internal(format!("Failed to reach scheduler: {}", e)));
+        }
+
+        let core_processes = reply_rx
+            .await
+            .map_err(|e| Status::internal(format!("Scheduler failed to reply: {}", e)))?;
+
+        // Mapear CorePCB a ProtoPCB y filtrar por Tenant
+        let processes = core_processes
+            .into_iter()
+            .filter(|p| {
+                // Si somos master adm (en una impl real veriamos) o si pertenece al tenant
+                p.tenant_id.as_deref() == Some(&auth.tenant_id)
+            })
+            .map(|p| {
+                let state = match p.state {
+                    ank_core::ProcessState::New => ProtoProcessState::StatePending,
+                    ank_core::ProcessState::Ready => ProtoProcessState::StatePending,
+                    ank_core::ProcessState::Running => ProtoProcessState::StateRunning,
+                    ank_core::ProcessState::WaitingSyscall => ProtoProcessState::StateBlocked,
+                    ank_core::ProcessState::Completed => ProtoProcessState::StateCompleted,
+                    ank_core::ProcessState::Failed => ProtoProcessState::StateTerminated,
+                };
+
+                ProtoPcb {
+                    pid: p.pid.clone(),
+                    parent_pid: p.parent_pid.unwrap_or_default(),
+                    state: state.into(),
+                    quantum_used: Default::default(),
+                    memory: Some(ank_proto::v1::pcb::MemorySpace {
+                        instruction_pointer: p.memory_pointers.l1_instruction.clone(),
+                        context_refs: p.memory_pointers.l2_context_refs.clone(),
+                        registers: p.registers.temp_vars.clone(),
+                    }),
+                    inlined_context: p.inlined_context.clone(),
+                    created_at: Some(prost_types::Timestamp {
+                        seconds: p.created_at.timestamp(),
+                        nanos: p.created_at.timestamp_subsec_nanos() as i32,
+                    }),
+                    last_updated: None,
+                    priority: p.priority,
+                    process_name: p.process_name.clone(),
+                    tenant_id: p.tenant_id.unwrap_or_default(),
+                    session_key: String::new(), // redacted from gRPC output
+                }
+            })
+            .collect();
+
+        Ok(Response::new(ProcessList { processes }))
     }
 
     type TeleportProcessStream =

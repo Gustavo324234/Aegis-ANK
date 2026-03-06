@@ -45,6 +45,7 @@ pub enum SchedulerEvent {
     RemoteEvent(String, ank_proto::v1::TaskEvent), // Nuevo: Evento interceptado de un nodo remoto
     PreemptCurrent,
     TerminateProcess(String),
+    ListProcesses(tokio::sync::oneshot::Sender<Vec<PCB>>),
 }
 
 /// --- COGNITIVE SCHEDULER ---
@@ -165,6 +166,10 @@ impl CognitiveScheduler {
                 if self.current_running.as_ref() == Some(&pid) {
                     self.current_running = None;
                 }
+            }
+            SchedulerEvent::ListProcesses(reply_channel) => {
+                let processes = self.process_table.values().cloned().collect();
+                let _ = reply_channel.send(processes);
             }
         }
         Ok(())

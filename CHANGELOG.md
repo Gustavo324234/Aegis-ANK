@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.0] - 2026-03-06
+### Added
+- **[ANK-131] Aegis Admin CLI (Terminal Interface)**:
+    - **Native Binary**: Creación del crate `ank-cli` utilizando `clap` v4 para la gestión del Kernel en modo Headless (Terminal). Integrado al Workspace global.
+    - **Citadel Protocol**: Cliente gRPC implementado con interceptor que captura automáticamente `AEGIS_TENANT_ID` y `AEGIS_SESSION_KEY` del entorno operativo, integrándose con la capa Zero-Trust del Kernel.
+    - **Procesos en Tiempo Real**: Refactor del `ListProcesses` gRPC endpoint en `ank-server` implementando el modelo Actor-Pattern (mpsc/oneshot channel) para interrogar atómicamente al `CognitiveScheduler` sin desarmar su inner loop, exponiendo de forma read-only el mapa de memoria de los PCBs activos.
+    - **Streaming Cognitivo (`aegis run`)**: El subcomando orquesta eficientemente una llamada `SubmitTask` para capturar el PID seguido de una suscripción inmediata a `WatchTask`, emitiendo asincrónicamente el stream de tokens `Thought` a `stdout`.
+    - **Zero-Panic SRE**: Hook asíncrono para interrupciones de sistema (`Ctrl+C`) capturado por `tokio::signal` abortando elegantemente el stream transitorio (`std::process::exit(0)`) antes de inducir *panics* por bindings internos (pipe rotos, abortos gRPC forzados).
+
 ## [1.3.0] - 2026-03-06
 ### Added
 - **[ANK-130] Aegis Wasm SDK (Zero-Boilerplate Wrapper)**:

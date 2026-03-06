@@ -1,57 +1,24 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
-
-/// Representa la solicitud recibida por el plugin.
-#[derive(Debug, Deserialize)]
-struct PluginRequest {
-    action: String,
-    #[serde(default)]
-    params: serde_json::Value,
-}
-
-/// Representa la respuesta enviada por el plugin.
-#[derive(Debug, Serialize)]
-struct PluginResponse {
-    status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-}
+use std::path::PathBuf;
+use aegis_sdk::{PluginRequest, PluginResponse, PluginMetadata, run_plugin};
 
 const WORKSPACE_ROOT: &str = "/workspace";
 
 fn main() -> Result<()> {
-    let mut buffer = String::new();
-    io::stdin()
-        .read_to_string(&mut buffer)
-        .context("Error al leer de stdin")?;
-
-    let response = match process_request(&buffer) {
-        Ok(res) => res,
-        Err(e) => PluginResponse {
-            status: "error".to_string(),
-            data: None,
-            error: Some(format!("{:?}", e)),
-        },
+    let metadata = PluginMetadata {
+        name: "std_fs".to_string(),
+        description: "Standard File System Plugin for Aegis OS".to_string(),
+        example_json: serde_json::json!({
+            "action": "list_dir",
+            "params": {"path": "."}
+        }),
     };
 
-    let output = serde_json::to_string(&response).context("Error al serializar la respuesta")?;
-    io::stdout()
-        .write_all(output.as_bytes())
-        .context("Error al escribir en stdout")?;
-    io::stdout().flush().context("Error al limpiar stdout")?;
-
-    Ok(())
+    run_plugin(metadata, process_request)
 }
 
-fn process_request(input: &str) -> Result<PluginResponse> {
-    let request: PluginRequest = serde_json::from_str(input)
-        .context("Error al deserializar el JSON de entrada.")?;
-
+fn process_request(request: &PluginRequest) -> Result<PluginResponse> {
     match request.action.as_str() {
         "list_dir" => list_dir(&request.params),
         "read_file" => read_file(&request.params),
@@ -138,8 +105,11 @@ mod tests {
 
     #[test]
     fn test_unknown_action() {
-        let input = r#"{"action": "not_exists", "params": {}}"#;
-        let res = process_request(input).unwrap();
+        let req = aegis_sdk::PluginRequest {
+            action: "not_exists".to_string(),
+            params: serde_json::Value::Null,
+        };
+        let res = process_request(&req).unwrap();
         assert_eq!(res.status, "error");
     }
 }

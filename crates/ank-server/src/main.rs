@@ -51,10 +51,21 @@ async fn main() -> anyhow::Result<()> {
         ank_server::server::auth_interceptor,
     );
 
-    info!("ANK KernelService levantado exitosamente en {}", addr);
+    // Servicio Siren
+    let siren_impl = ank_server::siren::AnkSirenService::new(scheduler_tx.clone())?;
+    let siren_svc = ank_proto::v1::siren::siren_service_server::SirenServiceServer::with_interceptor(
+        siren_impl,
+        ank_server::server::auth_interceptor,
+    );
+
+    info!("ANK KernelService y SirenService levantados exitosamente en {}", addr);
 
     // Levantar Tonic Server
-    Server::builder().add_service(svc).serve(addr).await?;
+    Server::builder()
+        .add_service(svc)
+        .add_service(siren_svc)
+        .serve(addr)
+        .await?;
 
     Ok(())
 }

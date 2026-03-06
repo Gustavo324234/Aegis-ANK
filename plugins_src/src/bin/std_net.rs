@@ -1,51 +1,40 @@
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use std::io::{self, Read, Write};
-
-/// Representa la solicitud recibida por el plugin.
-/// En el caso de std_net interceptado, el Kernel pasará el HTML directo como bloque de texto
-/// o envolverá el resultado en un JSON. Para máxima flexibilidad, intentaremos parsear
-/// como JSON pero si falla asumiremos que es HTML crudo inyectado por el Kernel.
-#[derive(Debug, Deserialize)]
-struct PluginRequest {
-    action: String,
-    #[serde(default)]
-    html: String,
-}
-
-#[derive(Debug, Serialize)]
-struct PluginResponse {
-    status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-}
+use anyhow::Result;
+use aegis_sdk::{PluginRequest, PluginResponse, PluginMetadata, run_plugin};
 
 fn main() -> Result<()> {
-    let mut buffer = String::new();
-    io::stdin()
-        .read_to_string(&mut buffer)
-        .context("Error al leer de stdin")?;
-
-    // Lógica de limpieza: 
-    // Si el Kernel inyectó el HTML directamente (después de interceptar la URL),
-    // el buffer contendrá el HTML.
-    let cleaned_text = clean_html(&buffer);
-
-    let response = PluginResponse {
-        status: "success".to_string(),
-        data: Some(serde_json::Value::String(cleaned_text)),
-        error: None,
+    let metadata = PluginMetadata {
+        name: "std_net".to_string(),
+        description: "Network Access Plugin (URL Fetching & HTML Cleaning)".to_string(),
+        example_json: serde_json::json!({
+            "action": "fetch",
+            "url": "https://example.com"
+        }),
     };
 
-    let output = serde_json::to_string(&response).context("Error al serializar la respuesta")?;
-    io::stdout()
-        .write_all(output.as_bytes())
-        .context("Error al escribir en stdout")?;
-    io::stdout().flush().context("Error al limpiar stdout")?;
+    run_plugin(metadata, process_request)
+}
 
-    Ok(())
+fn process_request(request: &PluginRequest) -> Result<PluginResponse> {
+    match request.action.as_str() {
+        "parse" => {
+            let html = request.params.get("html")
+                .and_then(|h| h.as_str())
+                .unwrap_or("");
+            
+            let cleaned_text = clean_html(html);
+
+            Ok(PluginResponse {
+                status: "success".to_string(),
+                data: Some(serde_json::Value::String(cleaned_text)),
+                error: None,
+            })
+        }
+        _ => Ok(PluginResponse {
+            status: "error".to_string(),
+            data: None,
+            error: Some(format!("Acción desconocida: {}", request.action)),
+        }),
+    }
 }
 
 /// Limpiador de HTML ultra-ligero para Wasm (Cero dependencias externas).

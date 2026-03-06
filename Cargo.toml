@@ -3,6 +3,7 @@ members = [
     "crates/ank-proto",
     "crates/ank-core",
     "crates/ank-server",
+    "crates/aegis-sdk",
 ]
 resolver = "2"
 

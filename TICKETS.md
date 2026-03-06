@@ -1,10 +1,12 @@
 🗺️ ANK Project Tracking (Kanban Mode)
 Este archivo es la fuente de verdad del progreso del Aegis Neural Kernel. El programador debe mover los tickets de sección y actualizar las versiones según se complete el trabajo.
 
-### 🚀 VERSION 1.1.1 "IDENTITY RECOVERY" - LATEST ✅
-El fallo crítico en la inicialización de identidad ha sido corregido, asegurando que el Kernel reporte correctamente el estado de configuración pendiente.
+### 🚀 VERSION 1.2.0 "VOICE CAPABILITY" - LATEST ✅
+El Protocolo Siren ha sido implementado exitosamente, habilitando soporte para audio mediante gRPC estricto y políticas de backpressure que garantizan tolerancia a fallos.
 
 🟩 DONE (Completado)
+- [ANK-130] Aegis Wasm SDK (Zero-Boilerplate Wrapper) (v1.3.0)
+- [ANK-122] Implementación: Protocolo Siren (gRPC Stream) & Backpressure (v1.2.0)
 - [ANK-114] Fix: Identity Initialization & GetSystemStatus robust reporting (v1.1.1)
 - [ANK-603] Identity & Tenant Management: Master Admin Enclave & Dynamic Ports (v1.1.0)
 - [ANK-113] Cold-Fix: Borrow Checker E0382 & Limpieza imports (v1.0.3)

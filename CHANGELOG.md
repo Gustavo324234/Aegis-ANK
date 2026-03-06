@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.3.0] - 2026-03-06
+### Added
+- **[ANK-130] Aegis Wasm SDK (Zero-Boilerplate Wrapper)**:
+    - **Crate Native**: Creación del crate `aegis-sdk` en el workspace, abstrayendo boilerplate para futuros plugins Rust-Wasm.
+    - **Zero-Boilerplate**: Implementación de la función central `run_plugin` para abstraer Stdin/Stdout de forma segura y propagar errores a un `PluginResponse` estructurado sin provocar Panics.
+    - **Autodiscovery System**: Eliminación de descripciones hardcodeadas en el Kernel. Los plugins ahora contestan autonómicamente a `{"action": "get_metadata"}` proporcionando sus tarjetas de habilidad.
+    - **SRE Hardening**: Soporte de intercepción cognitiva y bypass para metadatos (ej: `std_net`), permitiendo que funcionen en simetría con la extracción de datos segura provista por el Kernel Ring 0.
+    - **Refactor Core Plugins**: Migración de `std_fs`, `std_sys`, y `std_net` reduciendo masivamente sus líneas de código delegando todo el control lógico al SDK centralizado.
+
+## [1.2.2] - 2026-03-06
+### Added
+- **[ANK-124] Local Speech-to-Text (Whisper Offloading)**:
+    - **Inferencia ML Local**: Integración de `whisper-rs` (Bindings whisper.cpp) para transcripción de audio en Ring 0 sin dependencias de nube.
+    - **Zero-Blocking Architecture**: Implementación de `tokio::task::spawn_blocking` para aislar la carga pesada de inferencia del runtime asíncrono, garantizando la estabilidad de los streams.
+    - **Filtro de Alucinaciones**: Sistema de limpieza heurística para descartar transcripciones de ruido o silencios generados erróneamente por el motor ML.
+    - **Auto-Task Injection**: Los comandos de voz transcritos se inyectan automáticamente en el `CognitiveScheduler` como tareas de prioridad Crítica (10).
+    - **Telemetría STT**: Nuevos eventos `STT_START`, `STT_DONE` y `STT_ERROR` para reportar el progreso de transcripción en tiempo real a la Shell.
+
+## [1.2.1] - 2026-03-06
+### Added
+- **[ANK-123] Native Voice Activity Detection (VAD)**:
+    - **Algoritmo WebRTC**: Integración del crate `webrtc-vad` para la detección de voz en tiempo real con alta agresividad.
+    - **Accumulator Buffer**: Implementación de un buffer de sincronización matemática que garantiza frames exactos de 20ms (640 bytes @ 16kHz) antes de cada análisis VAD.
+    - **Máquina de Estados de Voz**: Sistema de transición `SILENCE` <-> `SPEECH` con tolerancia de 600ms (30 frames) para evitar cortes prematuros durante pausas naturales de respiración.
+    - **Eventos de Control**: Emisión automática de `VAD_START` y `VAD_END` vía gRPC para sincronizar el estado visual de la Shell (The Orb).
+
+## [1.2.0] - 2026-03-05
+### Added
+- **[ANK-122] Protocolo Siren (gRPC Stream)**:
+    - **Contrato Bidireccional**: Se definió `SirenService` en `siren.proto` con streaming concurrente de `AudioChunk` y control de telemetría para voz interactiva.
+    - **Gestión Asíncrona (SRE)**: Implementación segura mediante `tokio::spawn` aislando el hilo gRPC principal del procesamiento de audio.
+    - **Backpressure Nativo**: Uso de un canal `tokio::sync::mpsc` de capacidad limitada (200 chunks). Si el consumo se retrasa, el kernel devuelve `RESOURCE_EXHAUSTED` forzando al cliente (Shell) a ralentizar el envío, previniendo *Out Of Memory* (OOM).
+    - **Test de Resiliencia**: Se incluyó un test integrado simulando Jitter de red para validar el rechazo de sobrecarga de manera predecible.
+
 ## [1.1.2] - 2026-03-05
 ### Added
 - **[ANK-115] Workflow: GitHub Action Code Bundler**:

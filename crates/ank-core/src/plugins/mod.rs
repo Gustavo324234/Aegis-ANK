@@ -106,49 +106,59 @@ impl PluginManager {
         })
     }
 
-    /// Carga un binario .wasm del disco, lo compila y lo cachea.
-    pub fn load_plugin(&mut self, path: &str) -> Result<(), PluginError> {
+    /// Carga un binario .wasm del disco, lo compila y lo cachea. Extrae metadatos dinámicamente.
+    pub async fn load_plugin(&mut self, path: &str) -> Result<(), PluginError> {
         let name = Path::new(path)
             .file_stem()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| PluginError::IOError("Invalid plugin path".to_string()))?;
+            .ok_or_else(|| PluginError::IOError("Invalid plugin path".to_string()))?
+            .to_string();
 
         let module = Module::from_file(&self.engine, path)
             .map_err(|e| PluginError::CompilationFailed(e.to_string()))?;
 
-        // Registro de metadatos asistido por el Kernel (Tool Discovery)
-        let (description, parameter_example) = match name {
-            "std_sys" => (
-                "Obtiene la fecha y hora actual del sistema en formato UTC.",
-                "{\"action\": \"get_time\"}"
-            ),
-            "std_fs" => (
-                "Explora el sistema de archivos del workspace (listado de directorios y lectura).",
-                "{\"action\": \"list_dir\", \"path\": \"/workspace\"}"
-            ),
-            "std_net" => (
-                "Acceso a red seguro: descarga e interpreta el contenido de una URL.",
-                "{\"action\": \"fetch\", \"url\": \"https://example.com\"}"
-            ),
-            _ => ("ANK Wasm Plugin (Metadata pendiente)", "{}"),
-        };
-
-        let metadata = PluginMetadata {
-            name: name.to_string(),
-            description: description.to_string(),
+        // 1. Insert placeholder metadata
+        let initial_metadata = PluginMetadata {
+            name: name.clone(),
+            description: "Loading...".to_string(),
             version: "1.0.0".to_string(),
-            author: "Aegis Kernel Team".to_string(),
-            parameter_example: parameter_example.to_string(),
+            author: "Loading...".to_string(),
+            parameter_example: "{}".to_string(),
         };
 
-        self.plugins
-            .insert(name.to_string(), Plugin { metadata, module });
+        self.plugins.insert(name.clone(), Plugin { metadata: initial_metadata, module });
+
+        // 2. Discover metadata running the plugin
+        let metadata_input = r#"{"action": "get_metadata"}"#;
+        match self.execute_plugin("system", &name, metadata_input).await {
+            Ok(json_out) => {
+                if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&json_out) {
+                    if let Some(data) = resp.get("data").and_then(|d| d.as_object()) {
+                        let final_metadata = PluginMetadata {
+                            name: name.clone(),
+                            description: data.get("description").and_then(|v| v.as_str()).unwrap_or("No description").to_string(),
+                            version: data.get("version").and_then(|v| v.as_str()).unwrap_or("1.0.0").to_string(),
+                            author: data.get("author").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
+                            parameter_example: data.get("example_json").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string()),
+                        };
+                        
+                        // Update the map
+                        if let Some(p) = self.plugins.get_mut(&name) {
+                            p.metadata = final_metadata;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to auto-discover plugin {}: {}", name, e);
+            }
+        }
         Ok(())
     }
 
     /// Escanea un directorio y carga todos los binarios .wasm encontrados.
     /// Útil para el despliegue automático mediante deploy_debian.sh.
-    pub fn load_all_from_dir(&mut self, dir_path: &str) -> Result<(), PluginError> {
+    pub async fn load_all_from_dir(&mut self, dir_path: &str) -> Result<(), PluginError> {
         let path = Path::new(dir_path);
         if !path.exists() || !path.is_dir() {
             return Err(PluginError::IOError(format!("Plugin directory not found: {}", dir_path)));
@@ -160,7 +170,7 @@ impl PluginManager {
             
             if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
                 if let Some(path_str) = path.to_str() {
-                    self.load_plugin(path_str)?;
+                    self.load_plugin(path_str).await?;
                     info!("Plugin auto-loaded: {:?}", path.file_name().unwrap_or_default());
                 }
             }
@@ -182,19 +192,33 @@ impl PluginManager {
 
         // --- INTERCEPCIÓN COGNITIVA (EPIC 8) ---
         // Si el plugin es std_net, interceptamos el JSON para realizar la descarga en el Host.
-        let final_input = if plugin_name == "std_net" {
+        let mut final_input = input_json.to_string();
+        if plugin_name == "std_net" {
             let req: serde_json::Value = serde_json::from_str(input_json)
                 .map_err(|e| PluginError::ExecutionFailed(format!("Invalid JSON for std_net: {}", e)))?;
             
-            let url = req["url"].as_str().ok_or_else(|| {
-                PluginError::ExecutionFailed("std_net requires 'url' parameter".to_string())
-            })?;
+            if let Some(action) = req.get("action").and_then(|a| a.as_str()) {
+                if action != "get_metadata" {
+                    let url = req.get("url").and_then(|u| u.as_str())
+                        .or_else(|| req.get("params").and_then(|p| p.get("url")).and_then(|u| u.as_str()))
+                        .ok_or_else(|| {
+                            PluginError::ExecutionFailed("std_net requires 'url' parameter".to_string())
+                        })?;
 
-            // El Kernel realiza la descarga segura
-            self.fetch_url_safe(url).await?
-        } else {
-            input_json.to_string()
-        };
+                    // El Kernel realiza la descarga segura
+                    let raw_html = self.fetch_url_safe(url).await?;
+                    
+                    // Empaquetamos el HTML para el WASM SDK
+                    let wrapped = serde_json::json!({
+                        "action": "parse",
+                        "params": {
+                            "html": raw_html
+                        }
+                    });
+                    final_input = wrapped.to_string();
+                }
+            }
+        }
 
         // 1. Configurar Stdin/Stdout virtuales para el intercambio de JSON
         let stdin = MemoryInputPipe::new(final_input.as_bytes().to_vec());
@@ -365,7 +389,7 @@ mod tests {
         file.write_all(&wasm_bytes).unwrap();
         let path = file.path().to_str().unwrap();
 
-        manager.load_plugin(path).unwrap();
+        manager.load_plugin(path).await.unwrap();
         let res = manager.execute_plugin("test_tenant", "test", "{}").await;
 
         assert!(res.is_err());

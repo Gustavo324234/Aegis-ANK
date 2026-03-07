@@ -86,6 +86,8 @@ impl CognitiveScheduler {
         self.internal_tx = Some(internal_tx);
         info!("Cognitive Scheduler engine initialized.");
 
+        let mut gc_interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+
         loop {
             tokio::select! {
                 // Prioridad 1: Procesar eventos externos
@@ -96,6 +98,17 @@ impl CognitiveScheduler {
                 // Prioridad 2: Ciclo de despacho (Reconcile)
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
                     self.reconcile().await.context("Error during state reconciliation")?;
+                }
+
+                // Prioridad 3: GC Pasivo
+                _ = gc_interval.tick() => {
+                    let now = chrono::Utc::now();
+                    let five_mins = chrono::Duration::minutes(5);
+                    self.process_table.retain(|_, pcb| {
+                        let is_finished = matches!(pcb.state, crate::pcb::ProcessState::Completed | crate::pcb::ProcessState::Failed);
+                        let is_old = (now - pcb.created_at) > five_mins;
+                        !(is_finished && is_old)
+                    });
                 }
             }
         }

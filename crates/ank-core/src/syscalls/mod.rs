@@ -89,6 +89,10 @@ impl SyscallExecutor {
                 // Validación y Ensamblaje vía VCM
                 let file_path = if uri.starts_with("file://") { &uri[7..] } else { &uri };
                 
+                if !crate::vcm::is_safe_path(tenant_id, file_path) {
+                    return Err(SyscallError::SecurityViolation(format!("Path traversal attempt blocked: {}", file_path)));
+                }
+
                 // Intentamos leer el archivo usando el motor de contexto (VCM)
                 // Pero como ReadFile es una Syscall puntual, delegamos a la lógica de Jailing del VCM
                 let tenant_root = format!("./users/{}/workspace", tenant_id);
@@ -103,6 +107,10 @@ impl SyscallExecutor {
             Syscall::WriteFile { uri, content, metadata } => {
                 // Mediación vía The Scribe para trazabilidad multi-tenant
                 let file_path = if uri.starts_with("file://") { &uri[7..] } else { &uri };
+                
+                if !crate::vcm::is_safe_path(tenant_id, file_path) {
+                    return Err(SyscallError::SecurityViolation(format!("Path traversal attempt blocked: {}", file_path)));
+                }
                 
                 self.scribe.write_and_commit(tenant_id, file_path, content.as_bytes(), metadata)
                     .await
@@ -199,13 +207,13 @@ static WRITE_RE: OnceLock<Regex> = OnceLock::new();
 /// Detecta llamadas estructuradas dentro del stream de texto de la IA.
 pub fn parse_syscall(text: &str) -> Option<Syscall> {
     let plugin_re = PLUGIN_RE
-        .get_or_init(|| Regex::new(r#"\[SYS_CALL_PLUGIN\("([^"]+)",\s*(\{.*?\})\)\]"#).unwrap());
+        .get_or_init(|| Regex::new(r#"\[SYS_CALL_PLUGIN\("([^"]+)",\s*(\{.*?\})\)\]"#).expect("FATAL: Invalid static regex pattern"));
 
-    let read_re = READ_RE.get_or_init(|| Regex::new(r#"\[READ_FILE\("([^"]+)"\)\]"#).unwrap());
+    let read_re = READ_RE.get_or_init(|| Regex::new(r#"\[READ_FILE\("([^"]+)"\)\]"#).expect("FATAL: Invalid static regex pattern"));
 
     let write_re = WRITE_RE.get_or_init(|| {
         // Formato esperado: [WRITE_FILE("path", "content", {"task_id": "..."})]
-        Regex::new(r#"\[WRITE_FILE\("([^"]+)",\s*"([\s\S]*?)",\s*(\{.*?\})\)\]"#).unwrap()
+        Regex::new(r#"\[WRITE_FILE\("([^"]+)",\s*"([\s\S]*?)",\s*(\{.*?\})\)\]"#).expect("FATAL: Invalid static regex pattern")
     });
 
     // 1. Check for Plugin Call

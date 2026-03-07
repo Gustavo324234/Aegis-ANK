@@ -205,7 +205,7 @@ fn estimate_tokens(text: &str) -> usize {
 
 /// Auditoría de Seguridad: Previene el acceso a archivos fuera del sandbox de trabajo.
 /// Verifica que no existan retrocesos de directorio ("..") que escapen del root permitido.
-fn is_safe_path(_tenant_id: &str, path_str: &str) -> bool {
+pub fn is_safe_path(_tenant_id: &str, path_str: &str) -> bool {
     let path = Path::new(path_str);
 
     // 1. Prohibir rutas absolutas por seguridad (aislamiento)

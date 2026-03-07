@@ -6,6 +6,11 @@
 - **[SEC-006] Session Key Leak Protection**: Eliminado el campo `session_key` del contrato `PCB` en `kernel.proto` para evitar su transmisión insegura. Modificado el mapeo de `TeleportProcess` en el Swarm Client y Server para no enviar telemetría confidencial a otros nodos.
 - **[SEC-009] Tenant Password Persistence**: Actualizado el esquema de base de datos en `MasterEnclave` para almacenar hashes persistentes (`password_hash`) de los Tenants. Añadida la lógica independiente `authenticate_tenant` para validaciones SRE estructuradas en el servidor gRPC.
 
+### Performance & Stability Patches (Batch 2)
+- 🚀 **[SRE-004/013] Cognitive & Broker GC (Memory Leak Plug)**: Integrado Garbage Collector paralelo para purga de procesos `Completed`/`Failed` > 5min en el scheduler y purga de descriptores colgantes en el sistema de subscripción de la capa gRPC.
+- 🛡️ **[SEC-010] Syscall Jailing**: Inyectado de validación `is_safe_path` mediante el Virtual Context Manager en ejecución de rutinas sensibles de disco `[READ_FILE]` y `[WRITE_FILE]` para mitigar un posible LFI local.
+- ⚡ **[STB-017/020] Fail-Fast Boot**: Eliminada dependencia en `default_root_key` insegura en MasterEnclave; requerido explícito de la variable de ambiente estricta `AEGIS_ROOT_KEY`. Mantenibilidad a largo plazo vía strict `.expect("FATAL")` para las Syscalls de tipo Regex.
+
 ## [1.5.0] - 2026-03-06
 ### Added
 - **[ANK-125] Siren Protocol TTS (Voz Zero-Blocking)**:

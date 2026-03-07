@@ -1,3 +1,4 @@
+use anyhow::Context;
 use ank_core::{enclave::master::MasterEnclave, CognitiveScheduler, SchedulerEvent};
 use ank_core::plugins::PluginManager;
 use ank_core::plugins::watcher::watch_plugins_dir;
@@ -49,7 +50,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Instanciar el Master Enclave (DB administrativa)
     // El 'root_key' en producción debería ser inyectado vía variable de entorno.
-    let root_key = std::env::var("AEGIS_ROOT_KEY").unwrap_or_else(|_| "default_root_key".to_string());
+    let root_key = std::env::var("AEGIS_ROOT_KEY")
+        .context("FATAL: AEGIS_ROOT_KEY environment variable is missing. Halting system for security.")?;
     let master_enclave = MasterEnclave::open("admin.db", &root_key).await?;
 
     // Configuración e instanciación del servidor gRPC (0.0.0.0:50051 per req)

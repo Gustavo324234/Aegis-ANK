@@ -73,6 +73,19 @@ impl AnkRpcServer {
         event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<TaskEvent>>>>>,
         master_enclave: MasterEnclave,
     ) -> Self {
+        let broker_clone = event_broker.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                let mut broker = broker_clone.write().await;
+                broker.retain(|_, subs| {
+                    subs.retain(|tx| !tx.is_closed());
+                    !subs.is_empty()
+                });
+            }
+        });
+
         Self {
             scheduler_tx,
             event_broker,

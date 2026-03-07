@@ -170,7 +170,20 @@ impl SirenService for AnkSirenService {
                                             sample_rate: 0,
                                         }));
 
-                                        let mut state = ctx_clone.create_state().expect("Failed to create Whisper state");
+                                        let mut state = match ctx_clone.create_state() {
+                                            Ok(s) => s,
+                                            Err(e) => {
+                                                warn!("Failed to create Whisper state: {:?}", e);
+                                                let _ = tx_events_stt.try_send(Ok(SirenEvent {
+                                                    event_type: "STT_ERROR".to_string(),
+                                                    message: format!("State error: {:?}", e),
+                                                    processed_sequence_number: seq,
+                                                    tts_audio_chunk: vec![],
+                                                    sample_rate: 0,
+                                                }));
+                                                return;
+                                            }
+                                        };
                                         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
                                         params.set_n_threads(4);
                                         params.set_language(Some("es")); // Default Aegis Language

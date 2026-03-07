@@ -117,7 +117,6 @@ impl SwarmClient {
             priority: pcb.priority,
             process_name: pcb.process_name.clone(),
             tenant_id: pcb.tenant_id.clone().unwrap_or_default(),
-            session_key: pcb.session_key.clone().unwrap_or_default(),
         })
     }
 }

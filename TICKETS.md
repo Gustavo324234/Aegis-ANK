@@ -5,6 +5,9 @@ Este archivo es la fuente de verdad del progreso del Aegis Neural Kernel. El pro
 El Protocolo Siren ha sido implementado exitosamente, habilitando soporte para audio mediante gRPC estricto y políticas de backpressure que garantizan tolerancia a fallos.
 
 🟩 DONE (Completado)
+- [SEC-005] Insecure Hashing (Migrado a Argon2id)
+- [SEC-006] Session Key Leak en telemetría (Campo removido del Protobuf)
+- [SEC-009] Tenant Password Persistence en DB (Validación SRE configurada)
 - [ANK-131] Aegis Admin CLI (Terminal Interface) (v1.4.0)
 - [ANK-130] Aegis Wasm SDK (Zero-Boilerplate Wrapper) (v1.3.0)
 - [ANK-122] Implementación: Protocolo Siren (gRPC Stream) & Backpressure (v1.2.0)

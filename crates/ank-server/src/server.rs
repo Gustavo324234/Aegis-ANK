@@ -79,6 +79,18 @@ impl AnkRpcServer {
             master_enclave,
         }
     }
+
+    async fn validate_auth(&self, auth: &CitadelAuth) -> Result<(), Status> {
+        if let Ok(is_master) = self.master_enclave.authenticate_master(&auth.tenant_id, &auth.session_key).await {
+            if is_master { return Ok(()); }
+        }
+        
+        if let Ok(is_tenant) = self.master_enclave.authenticate_tenant(&auth.tenant_id, &auth.session_key).await {
+            if is_tenant { return Ok(()); }
+        }
+        
+        Err(Status::unauthenticated("Citadel AUTH_FAILURE: Access Denied."))
+    }
 }
 
 #[tonic::async_trait]
@@ -185,6 +197,12 @@ impl KernelService for AnkRpcServer {
             return Err(Status::unauthenticated("Citadel Protocol context missing (System is Operational)"));
         }
         
+        if is_init {
+            if let Some(a) = auth {
+                self.validate_auth(a).await?;
+            }
+        }
+        
         // Reportamos explícitamente el valor acorde al enum (0: Initializing, 1: Operational)
         let state = if is_init {
             SystemState::StateOperational as i32
@@ -260,7 +278,6 @@ impl KernelService for AnkRpcServer {
                     priority: p.priority,
                     process_name: p.process_name.clone(),
                     tenant_id: p.tenant_id.unwrap_or_default(),
-                    session_key: String::new(), // redacted from gRPC output
                 }
             })
             .collect();

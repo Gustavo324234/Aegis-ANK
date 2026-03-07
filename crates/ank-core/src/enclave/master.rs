@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -67,19 +66,31 @@ impl MasterEnclave {
                 tenant_id TEXT PRIMARY KEY,
                 network_port INTEGER NOT NULL,
                 password_must_change INTEGER NOT NULL DEFAULT 1,
+                password_hash TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
         ).context("Failed to init tenants table")?;
 
+        // SRE Migration: in case password_hash is missing from an older schema.
+        let _ = conn.execute("ALTER TABLE tenants ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''", []);
+
         Ok(())
     }
 
-    /// Hashea una clave usando SHA-256
-    pub fn hash_password(password: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(password.as_bytes());
-        format!("{:x}", hasher.finalize())
+    /// Hashea una clave usando Argon2id
+    pub fn hash_password(password: &str) -> Result<String> {
+        use argon2::{
+            password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+            Argon2,
+        };
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        let password_hash = argon2
+            .hash_password(password.as_bytes(), &salt)
+            .map_err(|e| anyhow::anyhow!("Hashing failed: {}", e))?
+            .to_string();
+        Ok(password_hash)
     }
 
     /// Verifica si ya existe un master admin configurado de forma robusta.
@@ -109,7 +120,7 @@ impl MasterEnclave {
             anyhow::bail!("Master Admin is already initialized. Cannot overwrite.");
         }
 
-        let hash = Self::hash_password(passphrase);
+        let hash = Self::hash_password(passphrase).context("Failed to hash password")?;
         let conn = self.connection.lock().await;
         conn.execute(
             "INSERT INTO master_admin (id, username, password_hash) VALUES (1, ?1, ?2)",
@@ -132,12 +143,42 @@ impl MasterEnclave {
         
         match hash_result {
             Ok(real_hash) => {
-                let input_hash = Self::hash_password(passphrase_or_session);
-                // Comparamos el hash de la entrada con el persistido
-                Ok(input_hash == real_hash)
+                use argon2::{password_hash::{PasswordHash, PasswordVerifier}, Argon2};
+                let parsed_hash = match PasswordHash::new(&real_hash) {
+                    Ok(ph) => ph,
+                    Err(_) => return Ok(false),
+                };
+                let is_valid = Argon2::default()
+                    .verify_password(passphrase_or_session.as_bytes(), &parsed_hash)
+                    .is_ok();
+                Ok(is_valid)
             },
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false), // Admin no encontrado
             Err(e) => Err(anyhow::anyhow!("Database authentication error: {}", e)),
+        }
+    }
+
+    /// Valida que el tenant proporcione un login válido no-root
+    pub async fn authenticate_tenant(&self, tenant_id: &str, passphrase_or_session: &str) -> Result<bool> {
+        let conn = self.connection.lock().await;
+        let mut stmt = conn.prepare("SELECT password_hash FROM tenants WHERE tenant_id = ?1 LIMIT 1")?;
+        
+        let hash_result: rusqlite::Result<String> = stmt.query_row([tenant_id], |row| row.get(0));
+        
+        match hash_result {
+            Ok(real_hash) => {
+                use argon2::{password_hash::{PasswordHash, PasswordVerifier}, Argon2};
+                let parsed_hash = match PasswordHash::new(&real_hash) {
+                    Ok(ph) => ph,
+                    Err(_) => return Ok(false),
+                };
+                let is_valid = Argon2::default()
+                    .verify_password(passphrase_or_session.as_bytes(), &parsed_hash)
+                    .is_ok();
+                Ok(is_valid)
+            },
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+            Err(e) => Err(anyhow::anyhow!("Database tenant authentication error: {}", e)),
         }
     }
 
@@ -157,10 +198,11 @@ impl MasterEnclave {
 
         // Generar passphrase temporal, e.g., uuid-base o hash. Usaremos uuid simplificado
         let temp_passphrase = uuid::Uuid::new_v4().to_string().replace("-", "")[0..12].to_string();
+        let hash = Self::hash_password(&temp_passphrase).context("Failed to hash temp passphrase")?;
 
         conn.execute(
-            "INSERT INTO tenants (tenant_id, network_port, password_must_change) VALUES (?1, ?2, 1)",
-            rusqlite::params![tenant_id, next_port],
+            "INSERT INTO tenants (tenant_id, network_port, password_must_change, password_hash) VALUES (?1, ?2, 1, ?3)",
+            rusqlite::params![tenant_id, next_port, hash],
         ).with_context(|| format!("Failed to create tenant {}", tenant_id))?;
 
         info!("Created tenant {} assigned to port {}", tenant_id, next_port);

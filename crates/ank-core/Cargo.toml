@@ -39,7 +39,7 @@ reqwest.workspace = true
 git2.workspace = true
 encoding_rs = "0.8.35"
 rusqlite = { version = "0.33.0", features = ["bundled-sqlcipher"] }
-sha2 = "0.10.9"
+argon2 = "0.5.3"
 notify = "6.1.1"
 notify-debouncer-mini = "0.4.1"
 

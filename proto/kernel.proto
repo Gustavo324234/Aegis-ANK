@@ -84,7 +84,6 @@ message PCB {
   uint32 priority = 9;
   string process_name = 10;
   string tenant_id = 11;
-  string session_key = 12;
 }
 
 enum ProcessState {

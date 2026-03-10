@@ -57,8 +57,11 @@ async fn main() -> anyhow::Result<()> {
     // Configuración e instanciación del servidor gRPC (0.0.0.0:50051 per req)
     let addr = "0.0.0.0:50051".parse()?;
     
+    let pm_clone2 = Arc::clone(&plugin_manager);
+    let hal = Arc::new(RwLock::new(ank_core::chal::CognitiveHAL::new(pm_clone2)));
+
     // Instanciar el servicio con la UI / Cliente Python apuntando acá
-    let ank_service = AnkRpcServer::new(scheduler_tx, Arc::clone(&event_broker), master_enclave);
+    let ank_service = AnkRpcServer::new(scheduler_tx.clone(), Arc::clone(&event_broker), master_enclave, hal);
 
     // Aplicar Middleware de Autenticación (Citadel Protocol)
     let svc = KernelServiceServer::with_interceptor(

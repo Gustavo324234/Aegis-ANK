@@ -84,10 +84,24 @@ pub struct CognitiveHAL {
 
 impl CognitiveHAL {
     pub fn new(plugin_manager: Arc<RwLock<PluginManager>>) -> Self {
+        let mut drivers: HashMap<String, Box<dyn InferenceDriver>> = HashMap::new();
+        
+        // Auto-Register CloudDriver if environment variables are populated
+        if let Some(cloud_driver) = crate::chal::drivers::CloudProxyDriver::from_env() {
+            drivers.insert("cloud-driver".to_string(), Box::new(cloud_driver));
+            tracing::info!("CloudProxyDriver initialized via ENV vars and registered.");
+        }
+
         Self {
-            drivers: HashMap::new(),
+            drivers,
             plugin_manager,
         }
+    }
+
+    pub fn update_cloud_credentials(&mut self, api_url: String, model: String, api_key: String) {
+        let cloud_driver = crate::chal::drivers::CloudProxyDriver::new(api_url, api_key, model.clone());
+        self.drivers.insert("cloud-driver".to_string(), Box::new(cloud_driver));
+        tracing::info!(model = %model, "CloudProxyDriver credentials updated dynamically and driver re-registered in HAL.");
     }
 
     pub fn register_driver(&mut self, id: &str, driver: Box<dyn InferenceDriver>) {

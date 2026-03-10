@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{info, warn};
-use webrtc_vad::{SampleRate, Vad, VadConfig};
+use webrtc_vad::{SampleRate, Vad, VadConfig, VadMode};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::server::CitadelAuth;
@@ -94,7 +94,7 @@ impl SirenService for AnkSirenService {
         let event_broker = self.event_broker.clone();
         
         tokio::spawn(async move {
-            let mut vad = Vad::new_with_config(VadConfig::VeryAggressive);
+            let mut vad = Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, VadMode::VeryAggressive);
             let mut accumulator = Vec::with_capacity(1280);
             let mut speech_buffer: Vec<f32> = Vec::with_capacity(16000 * 5); // 5s buffer pre-allocated
             let mut vad_state = VadState::Silence;

@@ -20,3 +20,5 @@ uuid.workspace = true
 chrono.workspace = true
 webrtc-vad = "0.4.0"
 whisper-rs = "0.13.0"
+serde_json.workspace = true
+prost-types.workspace = true

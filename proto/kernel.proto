@@ -32,7 +32,8 @@ service KernelService {
   rpc CreateTenant (TenantCreateRequest) returns (TenantCreateResponse);
 
   // Forces a password reset for a given tenant
-  rpc ResetTenantPassword (PasswordResetRequest) returns (Empty);
+  // Configures the Cognitive Engine dynamically
+  rpc ConfigureEngine (EngineConfigRequest) returns (Empty);
 }
 
 // --- MESSAGES ---
@@ -172,6 +173,12 @@ message TenantCreateResponse {
 message PasswordResetRequest {
   string tenant_id = 1;
   string new_passphrase = 2;
+}
+
+message EngineConfigRequest {
+  string api_url = 1;
+  string model_name = 2;
+  string api_key = 3;
 }
 
 message Empty {}

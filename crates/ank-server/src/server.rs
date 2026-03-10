@@ -1,7 +1,7 @@
 use ank_core::{enclave::master::MasterEnclave, SchedulerEvent, PCB as CorePCB};
 use ank_proto::v1::kernel_service_server::KernelService;
 use ank_proto::v1::{
-    AdminSetupRequest, AdminSetupResponse, Empty, PasswordResetRequest, Priority as ProtoPriority,
+    AdminSetupRequest, AdminSetupResponse, Empty, PasswordResetRequest, EngineConfigRequest, Priority as ProtoPriority,
     ProcessList, SystemState, SystemStatus, TaskEvent, TaskRequest, TaskResponse,
     TaskSubscription, TenantCreateRequest, TenantCreateResponse, Pcb as ProtoPcb, ProcessState as ProtoProcessState,
 };
@@ -65,6 +65,7 @@ pub struct AnkRpcServer {
     scheduler_tx: mpsc::Sender<SchedulerEvent>,
     event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<TaskEvent>>>>>,
     master_enclave: MasterEnclave,
+    hal: Arc<RwLock<ank_core::chal::CognitiveHAL>>,
 }
 
 impl AnkRpcServer {
@@ -72,6 +73,7 @@ impl AnkRpcServer {
         scheduler_tx: mpsc::Sender<SchedulerEvent>,
         event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<TaskEvent>>>>>,
         master_enclave: MasterEnclave,
+        hal: Arc<RwLock<ank_core::chal::CognitiveHAL>>,
     ) -> Self {
         let broker_clone = event_broker.clone();
         tokio::spawn(async move {
@@ -90,6 +92,7 @@ impl AnkRpcServer {
             scheduler_tx,
             event_broker,
             master_enclave,
+            hal,
         }
     }
 
@@ -335,7 +338,7 @@ impl KernelService for AnkRpcServer {
         core_pcb.inlined_context = pcb.inlined_context;
 
         // Suscribirse a eventos ANTES de enviar al scheduler para no perder nada
-        let (tx, _rx) = mpsc::channel(100);
+        let (tx, rx) = mpsc::channel(100);
         {
             let mut broker = self.event_broker.write().await;
             broker.entry(pid.clone()).or_insert_with(Vec::new).push(tx);
@@ -433,6 +436,42 @@ impl KernelService for AnkRpcServer {
             .reset_tenant_password(&req.tenant_id, &req.new_passphrase)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(Empty {}))
+    }
+
+    async fn configure_engine(
+        &self,
+        request: Request<EngineConfigRequest>,
+    ) -> Result<Response<Empty>, Status> {
+        let auth = request
+            .extensions()
+            .get::<CitadelAuth>()
+            .cloned()
+            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
+        let req = request.into_inner();
+
+        // 1. Guardar en SQLite cifrado de este Tenant
+        let tenant_db = ank_core::enclave::TenantDB::open(&auth.tenant_id, &auth.session_key)
+            .map_err(|e| Status::internal(format!("Failed to open tenant DB: {}", e)))?;
+
+        tenant_db.set_kv("engine_api_url", &req.api_url)
+            .map_err(|e| Status::internal(e.to_string()))?;
+            
+        tenant_db.set_kv("engine_model", &req.model_name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+            
+        tenant_db.set_kv("engine_api_key", &req.api_key)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        // 2. Notificar al CognitiveHAL (Driver en Memoria) de la nueva credencial
+        {
+            let mut hal = self.hal.write().await;
+            hal.update_cloud_credentials(req.api_url, req.model_name, req.api_key);
+        }
+
+        info!("Engine correctly configured for tenant {}", auth.tenant_id);
 
         Ok(Response::new(Empty {}))
     }

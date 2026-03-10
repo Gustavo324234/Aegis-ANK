@@ -1,4 +1,20 @@
-# Changelog
+# Aegis Neural Kernel (ANK) - Changelog
+
+## [1.5.1] - Unreleased
+
+### Added
+- **[ANK-133] Dynamic Engine Configuration:**
+  - Added `ConfigureEngine` gRPC inside `kernel.proto`.
+  - Secure storage of cloud inference credentials per Tenant using SQLCipher `TenantDB`.
+  - Dynamic `CognitiveHAL` reconfiguration at runtime without needing a Rust binary restart.
+
+## [1.5.0] - "Siren's Call" (GOLD MASTER RELEASE)
+### Added
+- **[ANK-132] Universal Cloud Driver (OpenAI-Compatible)**:
+    - **Cognitive Elasticity**: Implemented `CloudProxyDriver` utilizing `reqwest` async streams for external API connections.
+    - **SSE Resiliency**: Dynamic parsing of `Server-Sent Events` data blocks without `.unwrap()`, extracting text seamlessly with a line-buffer state machine.
+    - **Auto-Discovery**: `CognitiveHAL` now automatically instantiates the driver if `AEGIS_CLOUD_API_URL` and `AEGIS_CLOUD_API_KEY` are detected.
+    - **Error Mapping**: Robust resolution of HTML status errors into `SystemError::HardwareFailure`.
 
 ## [1.5.1] - 2026-03-07 (Security Patches)
 ### Security

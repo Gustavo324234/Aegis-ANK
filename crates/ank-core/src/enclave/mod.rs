@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;
-use tracing::{info, error};
+use tracing::info;
 
 pub mod master;
 

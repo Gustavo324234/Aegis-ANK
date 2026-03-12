@@ -1,8 +1,8 @@
 {
-  "crates/aegis-sdk": "0.1.0",
-  "crates/ank-cli": "0.1.0",
-  "crates/ank-core": "0.5.0",
+  "crates/aegis-sdk": "0.1.1",
+  "crates/ank-cli": "0.1.1",
+  "crates/ank-core": "0.5.1",
   "crates/ank-mcp": "1.4.0",
-  "crates/ank-proto": "0.1.0",
-  "crates/ank-server": "0.2.0"
+  "crates/ank-proto": "0.1.1",
+  "crates/ank-server": "0.2.1"
 }

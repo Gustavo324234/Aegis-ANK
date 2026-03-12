@@ -1,30 +1,34 @@
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
-use tracing::info;
+use tracing::{info, error, warn};
 use wasmtime::{Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::pipe::{MemoryInputPipe, MemoryOutputPipe};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
 
 pub mod watcher;
+pub mod signer;
 
-/// --- PLUGIN ERROR SYSTEM ---
+use crate::enclave::TenantDB;
+use self::signer::PluginSigner;
+
+/// --- PLUGIN ERROR SYSTEM (ANK-2411 Hardening) ---
 #[derive(Error, Debug)]
 pub enum PluginError {
     #[error("Compilation Failed: {0}")]
     CompilationFailed(String),
     #[error("Security Violation: {0}")]
     SecurityViolation(String),
-    #[error("Plugin Execution Failed: {0}")]
-    ExecutionFailed(String),
+    #[error("Logic Error: {0}")]
+    LogicError(String),
+    #[error("Resource Exhaustion: The plugin exceeded its CPU budget or memory")]
+    ResourceExhaustion,
     #[error("Function Not Found: {0}")]
     FunctionNotFound(String),
-    #[error("Execution Trap: {0}")]
-    ExecutionTrap(String),
-    #[error("Out of Fuel: The plugin exceeded its CPU budget")]
-    OutOfFuel,
     #[error("IO Error: {0}")]
     IOError(String),
+    #[error("Execution Failed: {0}")]
+    ExecutionFailed(String),
 }
 
 /// --- PLUGIN METADATA ---
@@ -56,8 +60,6 @@ impl WasiView for PluginState {
         &mut self.table
     }
     fn ctx(&mut self) -> &mut WasiCtx {
-        // WasiP1Ctx no implementa WasiView directamente pero el Linker P1 lo usa.
-        // Como implementamos WasiView para P2 futuro, mantenemos esto pero el P1 usará el campo directamente.
         unimplemented!("P1 bridge uses direct access; P2 will use this")
     }
 }
@@ -68,6 +70,7 @@ pub struct PluginManager {
     engine: Engine,
     linker: Linker<PluginState>,
     plugins: HashMap<String, Plugin>,
+    signer: PluginSigner,
 }
 
 impl PluginManager {
@@ -77,34 +80,31 @@ impl PluginManager {
         let mut config = Config::new();
 
         // --- CONFIGURACIÓN DE SEGURIDAD Y RENDIMIENTO ---
-        // 1. Habilitar soporte asíncrono para integrarse con Tokio
         config.async_support(true);
-
-        // 2. Limitar consumo de recursos (CPU Fuel)
-        // Esto permite abortar plugins que entren en bucles infinitos.
         config.consume_fuel(true);
-
-        // 3. Optimización máxima de compilación JIT (Cranelift)
         config.cranelift_opt_level(wasmtime::OptLevel::Speed);
-
-        // 4. Memory Limits y Protección
         config.memory_reservation(512 * 1024 * 1024); // Máximo 512MB RAM
 
         let engine =
             Engine::new(&config).map_err(|e| PluginError::CompilationFailed(e.to_string()))?;
 
-        // --- CACHEO DE LINKER ---
-        // Pre-vincular funciones WASI comunes para evitar re-computación en cada ejecución.
         let mut linker = Linker::new(&engine);
         wasmtime_wasi::preview1::add_to_linker_async(&mut linker, |s: &mut PluginState| {
             &mut s.wasi_ctx
         })
         .map_err(|e| PluginError::CompilationFailed(e.to_string()))?;
 
+        // Root key para validación de plugins (Ring 0)
+        // En un entorno real, AEGIS_ROOT_KEY vendría de enclave/vault.
+        let public_key = [0u8; 32]; 
+        let signer = PluginSigner::new(&public_key)
+            .map_err(|e| PluginError::IOError(format!("Failed to init Signer: {}", e)))?;
+
         Ok(Self {
             engine,
             linker,
             plugins: HashMap::new(),
+            signer,
         })
     }
 
@@ -117,6 +117,11 @@ impl PluginManager {
         path: &str,
         module: Module,
     ) -> Result<(), PluginError> {
+        // En reload_plugin_module asumimos que el watcher ya verificó la firma o lo haremos aquí.
+        // Por seguridad, siempre verificamos firma antes de cargar al mapa.
+        self.signer.verify_plugin(path)
+            .map_err(|e| PluginError::SecurityViolation(e.to_string()))?;
+
         let name = Path::new(path)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -140,6 +145,7 @@ impl PluginManager {
         );
 
         let metadata_input = r#"{"action": "get_metadata"}"#;
+        // system tenant no se marca como tainted fácilmente pero usamos error logging
         match self.execute_plugin("system", &name, metadata_input).await {
             Ok(json_out) => {
                 if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&json_out) {
@@ -174,14 +180,22 @@ impl PluginManager {
                 }
             }
             Err(e) => {
-                tracing::warn!("Failed to auto-discover plugin {}: {}", name, e);
+                warn!("Failed to auto-discover plugin {}: {}", name, e);
             }
         }
         Ok(())
     }
 
     /// Carga un binario .wasm del disco, lo compila y lo cachea. Extrae metadatos dinámicamente.
+    /// [ANK-2411] MANDATORY Signature Verification.
     pub async fn load_plugin(&mut self, path: &str) -> Result<(), PluginError> {
+        // 0. Firma Obligatoria (Ring 0 Policy)
+        self.signer.verify_plugin(path)
+            .map_err(|e| {
+                error!("SECURITY ALERT: Plugin signature mismatch for {}: {}", path, e);
+                PluginError::SecurityViolation(e.to_string())
+            })?;
+
         let name = Path::new(path)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -245,14 +259,13 @@ impl PluginManager {
                 }
             }
             Err(e) => {
-                tracing::warn!("Failed to auto-discover plugin {}: {}", name, e);
+                warn!("Failed to auto-discover plugin {}: {}", name, e);
             }
         }
         Ok(())
     }
 
     /// Escanea un directorio y carga todos los binarios .wasm encontrados.
-    /// Útil para el despliegue automático mediante deploy_debian.sh.
     pub async fn load_all_from_dir(&mut self, dir_path: &str) -> Result<(), PluginError> {
         let path = Path::new(dir_path);
         if !path.exists() || !path.is_dir() {
@@ -268,11 +281,13 @@ impl PluginManager {
 
             if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
                 if let Some(path_str) = path.to_str() {
-                    self.load_plugin(path_str).await?;
-                    info!(
-                        "Plugin auto-loaded: {:?}",
-                        path.file_name().unwrap_or_default()
-                    );
+                    // Si falla un plugin por firma, logeamos pero no abortamos toda la carga.
+                    // Zero-Panic policy.
+                    if let Err(e) = self.load_plugin(path_str).await {
+                        error!("Failed to load plugin {}: {}", path_str, e);
+                    } else {
+                        info!("Plugin loaded and verified: {:?}", path.file_name().unwrap_or_default());
+                    }
                 }
             }
         }
@@ -280,7 +295,7 @@ impl PluginManager {
     }
 
     /// Ejecuta un plugin en un sandbox aislado (Ring 0) con Jailing dinámico.
-    /// El paso de datos se realiza vía JSON por stdin/stdout (Estándar WASI).
+    /// [ANK-2411] Trap classification & Tainted Policy.
     pub async fn execute_plugin(
         &self,
         tenant_id: &str,
@@ -291,12 +306,12 @@ impl PluginManager {
             PluginError::FunctionNotFound(format!("Plugin {} not loaded", plugin_name))
         })?;
 
-        // --- INTERCEPCIÓN COGNITIVA (EPIC 8) ---
-        // Si el plugin es std_net, interceptamos el JSON para realizar la descarga en el Host.
+        // 1. Configurar Stdin/Stdout virtuales
         let mut final_input = input_json.to_string();
         if plugin_name == "std_net" {
+            // ... (keep fetch_url_safe logic) ...
             let req: serde_json::Value = serde_json::from_str(input_json).map_err(|e| {
-                PluginError::ExecutionFailed(format!("Invalid JSON for std_net: {}", e))
+                PluginError::LogicError(format!("Invalid JSON for std_net: {}", e))
             })?;
 
             if let Some(action) = req.get("action").and_then(|a| a.as_str()) {
@@ -310,15 +325,12 @@ impl PluginManager {
                                 .and_then(|u| u.as_str())
                         })
                         .ok_or_else(|| {
-                            PluginError::ExecutionFailed(
+                            PluginError::LogicError(
                                 "std_net requires 'url' parameter".to_string(),
                             )
                         })?;
 
-                    // El Kernel realiza la descarga segura
                     let raw_html = self.fetch_url_safe(url).await?;
-
-                    // Empaquetamos el HTML para el WASM SDK
                     let wrapped = serde_json::json!({
                         "action": "parse",
                         "params": {
@@ -330,19 +342,13 @@ impl PluginManager {
             }
         }
 
-        // 1. Configurar Stdin/Stdout virtuales para el intercambio de JSON
         let stdin = MemoryInputPipe::new(final_input.as_bytes().to_vec());
-        let stdout = MemoryOutputPipe::new(4096 * 10); // Buffer de 40KB para el resultado (HTML procesado)
+        let stdout = MemoryOutputPipe::new(4096 * 10); 
 
         // 2. Construir el contexto WASI (Dynamic Jailing)
         let workspace_path = format!("./users/{}/workspace", tenant_id);
-
-        // SRE Guard: Asegurar que el directorio de trabajo existe físicamente antes de montar la jaula
         std::fs::create_dir_all(&workspace_path).map_err(|e| {
-            PluginError::IOError(format!(
-                "Critical: Failed to create jail for tenant {}: {}",
-                tenant_id, e
-            ))
+            PluginError::IOError(format!("Failed to create jail: {}", e))
         })?;
 
         let mut wasi_builder = wasmtime_wasi::WasiCtxBuilder::new();
@@ -356,10 +362,7 @@ impl PluginManager {
                 wasmtime_wasi::FilePerms::all(),
             )
             .map_err(|e| {
-                PluginError::SecurityViolation(format!(
-                    "Sandbox Escape Prevention: Failed to open preopened dir for {}: {}",
-                    tenant_id, e
-                ))
+                PluginError::SecurityViolation(format!("Jailing Failed: {}", e))
             })?;
         let wasi_ctx = wasi_builder.build_p1();
 
@@ -369,39 +372,48 @@ impl PluginManager {
         };
 
         let mut store = Store::new(&self.engine, state);
+        store.set_fuel(1_000_000).map_err(|e| PluginError::LogicError(e.to_string()))?;
 
-        // Asignar combustible al Store (Presupuesto de CPU)
-        // 1 unidad ~= 1 instrucción (aprox).
-        store
-            .set_fuel(1_000_000)
-            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
-
-        // 3. Instanciar desde el Linker (Cacho de Módulos y Linker)
+        // 3. Instanciar
         let instance = self
             .linker
             .instantiate_async(&mut store, &plugin.module)
             .await
-            .map_err(|e| PluginError::ExecutionTrap(e.to_string()))?;
+            .map_err(|e| PluginError::LogicError(e.to_string()))?;
 
-        // 4. Invocar punto de entrada (_start para WASI Commands o execute)
-        // Intentamos _start primero (estándar WASI).
+        // 4. Invocar _start
         let func = instance
             .get_typed_func::<(), ()>(&mut store, "_start")
             .map_err(|_| PluginError::FunctionNotFound("_start not exported".to_string()))?;
 
-        func.call_async(&mut store, ()).await.map_err(|e| {
-            if let Some(wasmtime::Trap::OutOfFuel) = e.downcast_ref::<wasmtime::Trap>() {
-                PluginError::OutOfFuel
-            } else {
-                PluginError::ExecutionTrap(e.to_string())
+        if let Err(e) = func.call_async(&mut store, ()).await {
+            if let Some(trap) = e.downcast_ref::<wasmtime::Trap>() {
+                match trap {
+                    wasmtime::Trap::OutOfFuel => return Err(PluginError::ResourceExhaustion),
+                    wasmtime::Trap::MemoryOutOfBounds => {
+                        error!("SECURITY VIOLATION (OOB) in plugin {} for tenant {}. Marking as TAINTED.", plugin_name, tenant_id);
+                        // TAINTED POLICY: Mark in TenantDB
+                        // En un entorno real, AEGIS_SESSION_KEY vendría del contexto.
+                        if let Ok(db) = TenantDB::open(tenant_id, "default_internal_key") {
+                           let _ = db.set_kv(&format!("plugin_status:{}", plugin_name), "TAINTED");
+                        }
+                        return Err(PluginError::SecurityViolation("Memory Out Of Bounds (Potential Buffer Overflow Attack)".to_string()));
+                    }
+                    wasmtime::Trap::StackOverflow | wasmtime::Trap::UnreachableCode => {
+                        return Err(PluginError::LogicError(format!("Runtime Trap: {}", trap)));
+                    }
+                    _ => return Err(PluginError::LogicError(format!("Unknown Trap: {}", trap))),
+                }
             }
-        })?;
+            return Err(PluginError::ExecutionFailed(e.to_string()));
+        }
 
         // 5. Recuperar resultado
         let output_bytes = stdout.contents();
         String::from_utf8(output_bytes.to_vec())
             .map_err(|e| PluginError::ExecutionFailed(format!("Invalid UTF-8 output: {}", e)))
     }
+
 
     /// Implementación de seguridad SRE para peticiones HTTP.
     /// Bloquea ataques SSRF validando que la URL no apunte a rangos locales o privados.

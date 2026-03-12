@@ -3,17 +3,74 @@
 ## [2.1.0] - Unreleased
 
 ### Added
+- **[ANK-901] SRE Firewall - CI Pull Request Guard:**
+  - Implementación de `.github/workflows/pr_check.yml` para la auditoría automática de integridad en el repositorio del Kernel.
+  - Configuración de "The Forge CI" con caché optimizada mediante `rust-cache` para reducir tiempos de build.
+  - Aplicación de la política Zero-Panic a nivel de compilador denegando `unwrap_used` y `expect_used` mediante Clippy.
+  - Automatización del chequeo de formato (`cargo fmt`) y ejecución de suites de test en cada PR dirigido a `main`.
+
+- **[ANK-3003] MCP Cognitive Binding (Tool Discovery & Execution):**
+  - Implementación de `McpToolRegistry` para la gestión dinámica de herramientas externas vía Model Context Protocol.
+  - Interrogación automática de capacidades mediante `tools/list` al iniciar sesiones MCP.
+  - Mapeo cognitivo de esquemas JSON a System Prompt nativo para el LLM.
+  - Implementación de la Syscall `[SYS_MCP_EXEC(tool_name, args)]` con validación estricta de argumentos.
+  - Integración en `CognitiveHAL` para inyección de prompts y enrutamiento de despacho.
+
 - **[ANK-2301] VCM Tensor-Compressor (INT8 Quantization):**
   - Implemented symmetric Min/Max scaling for vector compression to reduce L3 Swap memory footprint by 75%.
   - Added `quantize_f32_to_i8` and `dequantize_i8_to_f32` with Zero-Panic division guards.
   - Refactored `MemoryFragment` to support optional INT8 storage, offloading the original f32 vectors after compression.
   - Validated mathematical precision with dedicated unit tests for quantization roundtrips.
-- **[ANK-2303] CCSP & Context Slicing (Contextual Canonical State Prioritization):**
+- **[ANK-2303] CCSP & Context Slicing (VCM Intelligence):**
   - Refactored `assemble_context` to implement intelligent token budgeting and hierarchical truncation.
   - Implemented S-DAG priority: `inlined_context` (DAG Dependencies) is now immutable and prioritized over history and swap.
   - Added smart truncation for `L2_CONTEXT`: history is sliced from the oldest message (tail-trimming) to preserve recent context while staying under `token_limit`.
   - Integrated `.env` aware budgeting: dynamically adjusts limits for `CloudOnly` models using `CLOUD_MAX_TOKENS`.
   - Optimized memory allocation using `String::with_capacity` based on token heuristics to minimize fragmentation.
+
+### Security / Hardening
+- **[ANK-2410] Citadel Identity Hardening (Zero-Leakage):**
+  - Implementación de ofuscación criptográfica para el `tenant_id` utilizando HMAC-SHA256 y Base64 URL-Safe.
+  - Modificado el `CitadelInterceptor` para inyectar el struct `SafeIdentity` en las extensiones de la request, separando el ID privado (interno) del ID público (telemetría).
+  - Sanitización proactiva de logs y errores gRPC: se ha reemplazado el uso del ID real por su alias en todos los eventos de `tracing` y mensajes de `tonic::Status`.
+  - Refactorizado el `PCB` (Process Control Block) para incluir `public_id` y redactar el `tenant_id` original en sus implementaciones de `Debug`.
+  - Garantizado el flujo Zero-Panic: el sistema rechaza conexiones (`UNAUTHENTICATED`) si la `AEGIS_ROOT_KEY` no está configurada, evitando fallos catastróficos.
+- **[ANK-2411] Plugin Signature Hardening & Trap Classification (Ring 0):**
+  - Implementación de verificación obligatoria de firmas Ed25519 para todos los plugins `.wasm` mediante la nueva utilidad `PluginSigner`.
+  - Refactorización del `PluginManager` para clasificar traps de Wasmtime en `SecurityViolation`, `LogicError` y `ResourceExhaustion`.
+  - Introducción de la política "Tainted": ante una violación de seguridad (`MemoryOutOfBounds`), el plugin es marcado automáticamente como `TAINTED` en la base de datos `TenantDB`, bloqueando ejecuciones futuras.
+  - Hardening del cargador de plugins con política Zero-Panic, propagando errores de firma mediante `anyhow` y registrando alertas SRE sin interrumpir el Kernel.
+- **[ANK-2412] PersistenceManager & Atomic State Reconciliation (SQLCipher):**
+  - Creación del `PersistenceManager` encapsulando transacciones de `SQLCipher` mediante `rusqlite` para la persistencia del estado del Scheduler.
+  - Modificación del `CognitiveScheduler` para implementar persistencia atómica: cada transición de estado de un PCB se guarda en disco *antes* de ser procesada en RAM.
+  - Implementación de Inyección de Dependencias (`StatePersistor`) permitiendo el uso de mocks en pruebas unitarias y SQLite cifrado en producción.
+  - Adición de un handler de señales `SIGTERM/Ctrl+C` en el binario principal para asegurar un `flush` definitivo de la base de datos antes del cierre del sistema.
+- **[ANK-2413] S-DAG Graph Compiler & Deterministic Topological Validation:**
+  - Implementación del `GraphCompiler` con validación topográfica mediante DFS para la detección eficiente de ciclos en grafos S-DAG.
+  - Validación de "Dangling Dependencies" para garantizar que cada ID de dependencia refiera a un nodo existente en el grafo.
+  - Creación del `GraphIntegrator` como middleware de seguridad entre el orquestador cognitivo y el Scheduler.
+  - Política SRE Zero-Panic: integración de un mecanismo de fallback que genera un grafo monolítico de emergencia ante fallos de compilación, asegurando el 100% de disponibilidad del sistema.
+  - Ampliación del bus de eventos del Kernel con el evento `RegisterGraph` para el registro seguro de grafos validados.
+
+### Epic 15 / Integration (Universal Integration - MCP)
+- **[ANK-2414] McpTransport Trait & SSE Client Implementation (v1.3.0):**
+  - Creación del crate `ank-mcp` para la comunicación con herramientas externas vía Model Context Protocol.
+  - Definición del trait `McpTransport` para el intercambio asíncrono de mensajes JSON-RPC 2.0.
+  - Implementación de `SseTransport` sobre `reqwest`, permitiendo la conexión a Sidecars MCP mediante streams SSE para recepción y HTTP POST para envío.
+  - Robustez Industrial: Implementación de un parser SSE resiliente que maneja fragmentación de red y timeouts explícitos de grado SRE.
+  - TDD Garantizado: Inclusión de tests de integración con un servidor mock (`warp`) validando el flujo bidireccional de mensajes en el Ring 0.
+- **[ANK-2415] StdIO Transport & Subprocess Jailing:**
+  - Implementación de `StdioTransport` para la ejecución de servidores MCP locales mediante subprocesos nativos.
+  - **Zero-Trust Isolation**: Integración obligatoria de `env_clear()` para evitar la herencia de secretos del Kernel y `current_dir()` para el confinamiento físico en el workspace del tenant.
+  - **I/O Asíncrono**: Uso de `BufReader` y streams de `Lines` para el parsing eficiente de mensajes JSON-RPC 2.0 delimitados por `\n`.
+  - **Lifecycle Management (Zombie Killer)**: Implementación manual del trait `Drop` para garantizar la terminación inmediata (`start_kill`) del proceso hijo, evitando procesos huérfanos en el host.
+  - **Zero-Panic SRE**: Propagación elegante de errores de "Broken Pipe" y fallos de spawn mediante `anyhow`, asegurando la estabilidad del Ring 0 ante fallos del servidor MCP.
+- **[ANK-3002] Async Multiplexer & Client Session (The Actor):**
+  - Implementación de `McpClientSession` siguiendo el Patrón Actor para la multiplexación asíncrona de mensajes JSON-RPC.
+  - **Multiplexación de Promesas**: Uso de un diccionario de promesas con canales `oneshot` de Tokio indexados por UUIDs para correlacionar peticiones y respuestas concurrentes.
+  - **Resiliencia Hardened**: Implementación obligatoria de timeouts de 30 segundos en todas las llamadas `call` para evitar bloqueos del S-DAG.
+  - **Notificación de Cierre**: Mecanismo de limpieza que notifica proactivamente a todas las peticiones pendientes (`ConnectionClosed`) si el transporte subyecente colapsa.
+  - **Zero-Panic Architectural Design**: Gestión segura de canales y locks de concurrencia (`Arc<Mutex<HashMap>>`) evitando deadlocks y garantizando robustez industrial.
 
 ### Refactored
 - **[ANK-2202] Scatter-Gather Scheduler & S-DAG Synchronization:**

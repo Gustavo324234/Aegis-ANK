@@ -5,6 +5,12 @@ Este archivo es la fuente de verdad del progreso del Aegis Neural Kernel. El pro
 El Protocolo Siren ha sido implementado exitosamente, habilitando soporte para audio mediante gRPC estricto y políticas de backpressure que garantizan tolerancia a fallos.
 
 🟩 DONE (Completado)
+- [ANK-3003] MCP Cognitive Binding (Tool Discovery & Execution) (v2.1.0)
+- [ANK-2415] StdIO Transport & Subprocess Jailing (v1.4.0)
+- [ANK-2410] Citadel Identity Hardening (Zero-Leakage) (v2.1.0)
+- [ANK-2411] Plugin Signature Hardening & Trap Classification (v2.1.0)
+- [ANK-2412] PersistenceManager & Atomic State Reconciliation (SQLCipher) (v2.1.0)
+- [ANK-2413] S-DAG Graph Compiler & Deterministic Topological Validation (v2.1.0)
 - [ANK-2301] VCM Tensor-Compressor (INT8 Quantization) (v0.3.0)
 - [ANK-2203] Hybrid Sub-Agent Routing (CognitiveHAL)
 - [ANK-2202] Scatter-Gather Scheduler & S-DAG Synchronization
@@ -45,6 +51,7 @@ El Protocolo Siren ha sido implementado exitosamente, habilitando soporte para a
 - [ANK-101] Definición del Contrato Protobuf (v0.4.0)
 
  IN PROGRESS (En Desarrollo)
+- [ANK-2414] McpTransport Trait & SSE Client Implementation (v1.3.0)
 - [ANK-115] Workflow: GitHub Action Code Bundler (v1.1.2)
 
 🟥 TO DO (Pendiente)

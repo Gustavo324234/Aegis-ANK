@@ -1,0 +1,37 @@
+name: SRE Firewall - Pull Request Guard
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  audit:
+    name: Robotics Audit (SRE)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: SRE Optimization - Cargo Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format Check (Leyes de Estilo)
+        run: cargo fmt --all -- --check
+
+      - name: Security Check (Clippy - El Gatillero)
+        # Regla estricta: Denegar todos los warnings y prohibir explícitamente el uso de .unwrap() y .expect()
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
+
+      - name: Hardening Tests
+        run: cargo test --workspace --all-features

@@ -80,6 +80,7 @@ pub trait InferenceDriver: Send + Sync {
 pub struct CognitiveHAL {
     pub drivers: HashMap<String, Box<dyn InferenceDriver>>,
     pub plugin_manager: Arc<RwLock<PluginManager>>,
+    pub mcp_registry: Arc<ank_mcp::registry::McpToolRegistry>,
 }
 
 impl CognitiveHAL {
@@ -95,6 +96,7 @@ impl CognitiveHAL {
         Self {
             drivers,
             plugin_manager,
+            mcp_registry: Arc::new(ank_mcp::registry::McpToolRegistry::new()),
         }
     }
 
@@ -193,9 +195,11 @@ impl CognitiveHAL {
             .await
             .get_available_tools_prompt();
 
+        let mcp_tool_prompt = self.mcp_registry.generate_system_prompt().await;
+
         let final_prompt = format!(
-            "{}\n{}\n\n[USER_PROCESS_INSTRUCTION]\n{}",
-            SYSTEM_PROMPT_MASTER, tool_prompt, instruction
+            "{}\n{}\n{}\n\n[USER_PROCESS_INSTRUCTION]\n{}",
+            SYSTEM_PROMPT_MASTER, tool_prompt, mcp_tool_prompt, instruction
         );
 
         // 4. Ejecutar generación

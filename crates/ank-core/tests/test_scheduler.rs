@@ -1,10 +1,13 @@
-use ank_core::{CognitiveScheduler, SchedulerEvent, PCB};
+use ank_core::{CognitiveScheduler, SchedulerEvent, SQLCipherPersistor, PCB};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
 #[tokio::test]
 async fn test_scheduler_priority_and_preemption() {
-    let scheduler = CognitiveScheduler::new();
+    // Base de datos en memoria para la prueba de integración
+    let persistence = Arc::new(SQLCipherPersistor::new(":memory:", "test_key").unwrap());
+    let scheduler = CognitiveScheduler::new(persistence);
     let (tx, rx) = mpsc::channel(100);
     let tx_internal = tx.clone();
 

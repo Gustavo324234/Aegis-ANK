@@ -13,17 +13,20 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
 use tracing::{info, warn};
+use crate::auth::citadel::{generate_public_tenant_id, SafeIdentity, sanitize_error};
 
 #[derive(Clone)]
 pub struct CitadelAuth {
     pub tenant_id: String,
     pub session_key: String,
+    pub public_id: String, // Added public_id for telemetry
 }
 
 impl std::fmt::Debug for CitadelAuth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CitadelAuth")
-            .field("tenant_id", &self.tenant_id)
+            .field("tenant_id", &"***REDACTED***") // Now redact the private ID
+            .field("public_id", &self.public_id)
             .field("session_key", &"***REDACTED***")
             .finish()
     }
@@ -41,7 +44,7 @@ pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
             Ok(s) => s.to_string(),
             Err(_) => return Err(Status::unauthenticated("Invalid tenant_id format")),
         },
-        None => return Ok(req), // No bloquea, permite que la lógica del RPC decida
+        None => return Ok(req),
     };
 
     let session_key = match metadata.get("x-aegis-session-key") {
@@ -52,10 +55,26 @@ pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
         None => return Ok(req),
     };
 
+    // Hardening ANK-2410: Derive public identity
+    let root_key = std::env::var("AEGIS_ROOT_KEY").map_err(|_| {
+        Status::unauthenticated("Aegis Security: Missing encryption context (ROOT_KEY)")
+    })?;
+
+    let public_id = generate_public_tenant_id(&tenant_id, root_key.as_bytes())
+        .map_err(|e| Status::internal(format!("Aegis Identity Error: {}", e)))?;
+
     let mut req = req;
+    
+    // Inyectar SafeIdentity solicitado en el ticket
+    req.extensions_mut().insert(SafeIdentity {
+        private_id: tenant_id.clone(),
+        public_id: public_id.clone(),
+    });
+
     req.extensions_mut().insert(CitadelAuth {
         tenant_id,
         session_key,
+        public_id,
     });
 
     Ok(req)
@@ -139,13 +158,14 @@ impl KernelService for AnkRpcServer {
         // Crear el PCB en ank-core
         let mut core_pcb = CorePCB::new("Remote Task".to_string(), priority, req.prompt);
         core_pcb.tenant_id = Some(auth.tenant_id.clone());
+        core_pcb.public_id = Some(auth.public_id.clone());
         core_pcb.session_key = Some(auth.session_key.clone());
 
         let pid = core_pcb.pid.clone();
 
         info!(
-            "Received SubmitTask: {} (Tenant: {}, Priority: {})",
-            pid, auth.tenant_id, priority
+            "Received SubmitTask: {} (Tenant_Public: {}, Priority: {})",
+            pid, auth.public_id, priority
         );
 
         // Enviar al Scheduler
@@ -293,7 +313,7 @@ impl KernelService for AnkRpcServer {
                     last_updated: None,
                     priority: p.priority,
                     process_name: p.process_name.clone(),
-                    tenant_id: p.tenant_id.unwrap_or_default(),
+                    tenant_id: p.public_id.unwrap_or_default(), // Return obfuscated ID
                 }
             })
             .collect();
@@ -329,6 +349,7 @@ impl KernelService for AnkRpcServer {
         );
         core_pcb.pid = pid.clone();
         core_pcb.tenant_id = Some(auth.tenant_id.clone());
+        core_pcb.public_id = Some(auth.public_id.clone());
         core_pcb.session_key = Some(auth.session_key.clone());
         core_pcb.parent_pid = if pcb.parent_pid.is_empty() {
             None
@@ -454,16 +475,28 @@ impl KernelService for AnkRpcServer {
 
         // 1. Guardar en SQLite cifrado de este Tenant
         let tenant_db = ank_core::enclave::TenantDB::open(&auth.tenant_id, &auth.session_key)
-            .map_err(|e| Status::internal(format!("Failed to open tenant DB: {}", e)))?;
+            .map_err(|e| {
+                let safe_msg = sanitize_error(&e.to_string(), &auth.tenant_id, &auth.public_id);
+                Status::internal(format!("Failed to open tenant DB: {}", safe_msg))
+            })?;
 
         tenant_db.set_kv("engine_api_url", &req.api_url)
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| {
+                let safe_msg = sanitize_error(&e.to_string(), &auth.tenant_id, &auth.public_id);
+                Status::internal(safe_msg)
+            })?;
             
         tenant_db.set_kv("engine_model", &req.model_name)
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| {
+                let safe_msg = sanitize_error(&e.to_string(), &auth.tenant_id, &auth.public_id);
+                Status::internal(safe_msg)
+            })?;
             
         tenant_db.set_kv("engine_api_key", &req.api_key)
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| {
+                let safe_msg = sanitize_error(&e.to_string(), &auth.tenant_id, &auth.public_id);
+                Status::internal(safe_msg)
+            })?;
 
         // 2. Notificar al CognitiveHAL (Driver en Memoria) de la nueva credencial
         {
@@ -471,7 +504,7 @@ impl KernelService for AnkRpcServer {
             hal.update_cloud_credentials(req.api_url, req.model_name, req.api_key);
         }
 
-        info!("Engine correctly configured for tenant {}", auth.tenant_id);
+        info!("Engine correctly configured for public_tenant {}", auth.public_id);
 
         Ok(Response::new(Empty {}))
     }

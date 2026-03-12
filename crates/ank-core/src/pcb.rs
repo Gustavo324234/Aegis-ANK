@@ -59,6 +59,7 @@ pub struct PCB {
     pub inlined_context: HashMap<String, String>,
     // --- Multi-Tenant & Zero-Knowledge ---
     pub tenant_id: Option<String>,
+    pub public_id: Option<String>, // Added for secure logging (ANK-2410)
     pub session_key: Option<String>, // Sensitive: Avoid logging this!
 }
 
@@ -66,7 +67,8 @@ impl std::fmt::Debug for PCB {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PCB")
             .field("pid", &self.pid)
-            .field("tenant_id", &self.tenant_id)
+            .field("tenant_id", &"***REDACTED***")
+            .field("public_id", &self.public_id)
             .field(
                 "session_key",
                 &self.session_key.as_ref().map(|_| "***REDACTED***"),
@@ -110,6 +112,7 @@ impl PCB {
             model_pref: ModelPreference::HybridSmart,
             inlined_context: HashMap::new(),
             tenant_id: None,
+            public_id: None,
             session_key: None,
         }
     }

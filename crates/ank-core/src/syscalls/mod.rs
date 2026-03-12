@@ -24,6 +24,12 @@ pub enum Syscall {
         content: String,
         metadata: CommitMetadata,
     },
+
+    /// Ejecución de herramientas MCP (Model Context Protocol)
+    McpExec {
+        tool_name: String,
+        args_json: String,
+    },
 }
 
 /// --- SYSCALL ERROR ---
@@ -52,6 +58,7 @@ pub struct SyscallExecutor {
     vcm: Arc<VirtualContextManager>,
     scribe: Arc<ScribeManager>,
     swap: Arc<LanceSwapManager>,
+    mcp_registry: Arc<ank_mcp::registry::McpToolRegistry>,
 }
 
 impl SyscallExecutor {
@@ -60,12 +67,14 @@ impl SyscallExecutor {
         vcm: Arc<VirtualContextManager>,
         scribe: Arc<ScribeManager>,
         swap: Arc<LanceSwapManager>,
+        mcp_registry: Arc<ank_mcp::registry::McpToolRegistry>,
     ) -> Self {
         Self {
             plugin_manager,
             vcm,
             scribe,
             swap,
+            mcp_registry,
         }
     }
 
@@ -150,6 +159,23 @@ impl SyscallExecutor {
                     "[SYSTEM_RESULT: File {} written and committed to Git]",
                     uri
                 ))
+            }
+            Syscall::McpExec {
+                tool_name,
+                args_json,
+            } => {
+                let args_val: serde_json::Value = serde_json::from_str(&args_json)
+                    .map_err(|e| SyscallError::InternalError(format!("Invalid MCP args JSON: {}", e)))?;
+
+                let result = ank_mcp::registry::McpToolDispatcher::execute(
+                    &self.mcp_registry,
+                    &tool_name,
+                    args_val,
+                )
+                .await
+                .map_err(|e| SyscallError::PluginError(e.to_string()))?;
+
+                Ok(format!("[SYSTEM_RESULT: {}]", result))
             }
         }
     }
@@ -238,6 +264,7 @@ impl StreamInterceptor {
 static PLUGIN_RE: OnceLock<Regex> = OnceLock::new();
 static READ_RE: OnceLock<Regex> = OnceLock::new();
 static WRITE_RE: OnceLock<Regex> = OnceLock::new();
+static MCP_RE: OnceLock<Regex> = OnceLock::new();
 
 /// Parser de Syscalls Cognitivas.
 /// Detecta llamadas estructuradas dentro del stream de texto de la IA.
@@ -254,6 +281,11 @@ pub fn parse_syscall(text: &str) -> Option<Syscall> {
     let write_re = WRITE_RE.get_or_init(|| {
         // Formato esperado: [WRITE_FILE("path", "content", {"task_id": "..."})]
         Regex::new(r#"\[WRITE_FILE\("([^"]+)",\s*"([\s\S]*?)",\s*(\{.*?\})\)\]"#)
+            .expect("FATAL: Invalid static regex pattern")
+    });
+
+    let mcp_re = MCP_RE.get_or_init(|| {
+        Regex::new(r#"\[SYS_MCP_EXEC\("([^"]+)",\s*(\{.*?\})\)\]"#)
             .expect("FATAL: Invalid static regex pattern")
     });
 
@@ -285,6 +317,14 @@ pub fn parse_syscall(text: &str) -> Option<Syscall> {
                 metadata,
             });
         }
+    }
+
+    // 4. Check for MCP Tool Call
+    if let Some(caps) = mcp_re.captures(text) {
+        return Some(Syscall::McpExec {
+            tool_name: caps[1].to_string(),
+            args_json: caps[2].to_string(),
+        });
     }
 
     None

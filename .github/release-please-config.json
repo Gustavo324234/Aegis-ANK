@@ -1,0 +1,36 @@
+{
+  "packages": {
+    "crates/aegis-sdk": {
+      "release-type": "rust",
+      "package-name": "aegis-sdk"
+    },
+    "crates/ank-cli": {
+      "release-type": "rust",
+      "package-name": "ank-cli"
+    },
+    "crates/ank-core": {
+      "release-type": "rust",
+      "package-name": "ank-core"
+    },
+    "crates/ank-mcp": {
+      "release-type": "rust",
+      "package-name": "ank-mcp"
+    },
+    "crates/ank-proto": {
+      "release-type": "rust",
+      "package-name": "ank-proto"
+    },
+    "crates/ank-server": {
+      "release-type": "rust",
+      "package-name": "ank-server"
+    }
+  },
+  "plugins": [
+    {
+      "type": "cargo-workspace",
+      "update_backend": "cargo"
+    }
+  ],
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true
+}

@@ -1,5 +1,5 @@
 use anyhow::Context;
-use ank_core::{enclave::master::MasterEnclave, CognitiveScheduler, SchedulerEvent};
+use ank_core::{enclave::master::MasterEnclave, CognitiveScheduler, SchedulerEvent, SQLCipherPersistor, StatePersistor};
 use ank_core::plugins::PluginManager;
 use ank_core::plugins::watcher::watch_plugins_dir;
 use ank_proto::v1::kernel_service_server::KernelServiceServer;
@@ -26,8 +26,28 @@ async fn main() -> anyhow::Result<()> {
     // El Event Broker gestiona los streams de output hacia los clientes gRPC
     let event_broker = Arc::new(RwLock::new(HashMap::new()));
 
-    // Inicializar el Cognitive Scheduler principal
-    let scheduler = CognitiveScheduler::new();
+    // Regla ANK-2412: Inicializar PersistenceManager (SQLCipher)
+    // Usamos AEGIS_ROOT_KEY (mismo que Enclave) para cifrar la persistencia del Scheduler
+    let root_key = std::env::var("AEGIS_ROOT_KEY")
+        .context("FATAL: AEGIS_ROOT_KEY environment variable is missing.")?;
+    
+    let persistence = Arc::new(SQLCipherPersistor::new("scheduler_state.db", &root_key)?);
+    
+    // Inicializar el Cognitive Scheduler principal con persistencia inyectada
+    let scheduler = CognitiveScheduler::new(Arc::clone(&persistence) as Arc<dyn StatePersistor>);
+
+    // SIGTERM / Ctrl+C Handler: Atomic Flush
+    let persistence_for_signal = Arc::clone(&persistence);
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            info!("SIGTERM/Ctrl+C received. Flushing persistence layer...");
+            if let Err(e) = persistence_for_signal.flush().await {
+                tracing::error!("Final flush failed: {}", e);
+            }
+            info!("Flush complete. Terminating ANK server safely.");
+            std::process::exit(0);
+        }
+    });
 
     // Hot-reload Wasm Plugins Initialization
     let plugin_manager = Arc::new(RwLock::new(PluginManager::new()?));
@@ -49,9 +69,6 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Instanciar el Master Enclave (DB administrativa)
-    // El 'root_key' en producción debería ser inyectado vía variable de entorno.
-    let root_key = std::env::var("AEGIS_ROOT_KEY")
-        .context("FATAL: AEGIS_ROOT_KEY environment variable is missing. Halting system for security.")?;
     let master_enclave = MasterEnclave::open("admin.db", &root_key).await?;
 
     // Configuración e instanciación del servidor gRPC (0.0.0.0:50051 per req)

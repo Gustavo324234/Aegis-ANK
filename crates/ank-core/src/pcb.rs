@@ -67,7 +67,10 @@ impl std::fmt::Debug for PCB {
         f.debug_struct("PCB")
             .field("pid", &self.pid)
             .field("tenant_id", &self.tenant_id)
-            .field("session_key", &self.session_key.as_ref().map(|_| "***REDACTED***"))
+            .field(
+                "session_key",
+                &self.session_key.as_ref().map(|_| "***REDACTED***"),
+            )
             .field("state", &self.state)
             .field("priority", &self.priority)
             .field("process_name", &self.process_name)

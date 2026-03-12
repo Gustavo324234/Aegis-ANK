@@ -47,112 +47,51 @@ impl VirtualContextManager {
         swap_manager: &LanceSwapManager,
         token_limit: usize,
     ) -> Result<String, VCMError> {
-        // 1. Calcular base (System + L1) de forma eficiente
+        // Enlazar dependencias para la heurística basada en .env si es CloudOnly
+        let actual_token_limit = match pcb.model_pref {
+            crate::scheduler::ModelPreference::CloudOnly => std::env::var("CLOUD_MAX_TOKENS")
+                .unwrap_or_else(|_| "8192".to_string())
+                .parse::<usize>()
+                .unwrap_or(8192),
+            _ => token_limit,
+        };
+
         let l1_prompt = &pcb.memory_pointers.l1_instruction;
-        let base_tokens = estimate_tokens(SYSTEM_INSTRUCTIONS)
-            + estimate_tokens("## INSTRUCTION\n")
-            + estimate_tokens(l1_prompt)
-            + 4; // Margen para saltos de línea y separadores
+        let sys_tokens = estimate_tokens(SYSTEM_INSTRUCTIONS);
+        let instr_tokens = estimate_tokens("\n## INSTRUCTION\n") + estimate_tokens(l1_prompt) + 2;
 
-        if base_tokens > token_limit {
-            return Err(VCMError::ContextOverflow(token_limit));
-        }
-
-        // Pre-asignamos buffer con una estimación agresiva para evitar re-allocations
-        // 1 token ~= 4 bytes.
-        let mut final_context = String::with_capacity(token_limit * 4);
-
-        // Empezamos el ensamblaje directamente en el buffer final
-        final_context.push_str(SYSTEM_INSTRUCTIONS);
-        final_context.push_str("\n\n");
-
-        let mut current_tokens = base_tokens;
-        let mut has_l2 = false;
-        let mut l3_added = false;
-
-        // 2. Procesar L2 Context References
-        let tenant_id = pcb.tenant_id.as_deref().unwrap_or("default");
-        let tenant_root = format!("./users/{}/workspace", tenant_id);
-
-        for ref_uri in &pcb.memory_pointers.l2_context_refs {
-            if ref_uri.starts_with("file://") {
-                let path_part = &ref_uri[7..];
-                if !is_safe_path(tenant_id, path_part) {
-                    return Err(VCMError::PathTraversalDetected(path_part.to_string()));
-                }
-
-                // Rutear al Workspace del Tenant
-                let full_path = Path::new(&tenant_root).join(path_part);
-
-                // OPTIMIZACIÓN: Verificar metadatos antes de leer
-                let metadata = match tokio::fs::metadata(&full_path).await {
-                    Ok(m) => m,
-                    Err(e) => return Err(VCMError::IOError(format!("{}: {}", path_part, e))),
-                };
-
-                if metadata.len() > MAX_FILE_SIZE_BYTES {
-                    warn!(path = %path_part, size = %metadata.len(), "File too large for VCM, skipping.");
-                    if !has_l2 {
-                        final_context.push_str("## ATTACHED CONTEXT\n");
-                        has_l2 = true;
-                    }
-                    final_context.push_str(&format!(
-                        "[SYSTEM: {} omitido por tamaño excesivo]\n",
-                        ref_uri
-                    ));
-                    continue;
-                }
-
-                // Estimación rápida basada en tamaño de archivo antes de leer
-                let estimated_entry_tokens = (metadata.len() as usize / 4) + 50; // +50 por el header
-
-                if current_tokens + estimated_entry_tokens > token_limit {
-                    if !has_l2 {
-                        final_context.push_str("## ATTACHED CONTEXT\n");
-                        has_l2 = true;
-                    }
-                    final_context.push_str(&format!(
-                        "[SYSTEM: {} omitido por falta de memoria]\n",
-                        ref_uri
-                    ));
-                    continue;
-                }
-
-                // Lectura asíncrona (Solo si sabemos que cabe y es seguro)
-                let content = match tokio::fs::read_to_string(&full_path).await {
-                    Ok(c) => c,
-                    Err(e) => return Err(VCMError::IOError(format!("{}: {}", path_part, e))),
-                };
-
-                if !has_l2 {
-                    final_context.push_str("## ATTACHED CONTEXT\n");
-                    has_l2 = true;
-                }
-
-                final_context.push_str("[File: ");
-                final_context.push_str(path_part);
-                final_context.push_str("]\n");
-                final_context.push_str(&content);
-                final_context.push_str("\n");
-
-                current_tokens += estimate_tokens(&content) + 10;
+        // DAG Context (inlined_context) PRIORITY 1 (INTOCABLE)
+        let mut inlined_str = String::new();
+        if !pcb.inlined_context.is_empty() {
+            inlined_str.push_str("\n## DAG CONTEXT (DEPENDENCIES)\n");
+            for (node, out) in &pcb.inlined_context {
+                inlined_str.push_str(&format!("[Node: {}]\n{}\n", node, out));
             }
         }
+        let inlined_tokens = estimate_tokens(&inlined_str);
 
-        // 3. Procesar L3 Semantic Memory (Swap)
-        // REGLA SRE: Solo si queda espacio después de L2.
-        if current_tokens < token_limit && !pcb.memory_pointers.swap_refs.is_empty() {
+        let base_tokens = sys_tokens + instr_tokens + inlined_tokens;
+
+        if base_tokens > actual_token_limit {
+            return Err(VCMError::ContextOverflow(actual_token_limit));
+        }
+
+        let mut current_tokens = base_tokens;
+
+        // L3 SEMANTIC MEMORY - Medium Priority
+        let mut l3_added = false;
+        let mut l3_str = String::new();
+        let tenant_id = pcb.tenant_id.as_deref().unwrap_or("default");
+
+        if !pcb.memory_pointers.swap_refs.is_empty() {
             for swap_query in &pcb.memory_pointers.swap_refs {
-                // Parseamos el query. Si empieza con 'vec:', lo tratamos como vector.
-                // Si no, usamos un vector dummy (esto se integrará con un embedding driver luego).
                 let vector = if swap_query.starts_with("vec:") {
                     swap_query[4..]
                         .split(',')
                         .filter_map(|s| s.trim().parse::<f32>().ok())
                         .collect::<Vec<f32>>()
                 } else {
-                    // TODO: Reemplazar por llamada a Embedding Server
-                    vec![0.0; 128]
+                    vec![0.0; 128] // TODO: Replace with Embedding Server call
                 };
 
                 if vector.is_empty() {
@@ -161,38 +100,145 @@ impl VirtualContextManager {
 
                 if let Ok(fragments) = swap_manager.search(tenant_id, vector, 3).await {
                     for fragment in fragments {
-                        let fragment_tokens = estimate_tokens(&fragment.text) + 20;
-
-                        if current_tokens + fragment_tokens > token_limit {
+                        let fragment_text =
+                            format!("[Memory ID: {}]\n{}\n", fragment.id, fragment.text);
+                        let fragment_tokens = estimate_tokens(&fragment_text) + 10;
+                        if current_tokens + fragment_tokens <= actual_token_limit {
+                            if !l3_added {
+                                l3_str.push_str("\n## L3 SEMANTIC MEMORY\n");
+                                l3_added = true;
+                            }
+                            l3_str.push_str(&fragment_text);
+                            current_tokens += fragment_tokens;
+                        } else {
+                            // Se reduce la cantidad de fragmentos devueltos al quedarse sin memoria
                             break;
                         }
-
-                        if !l3_added {
-                            final_context.push_str("\n## L3 SEMANTIC MEMORY\n");
-                            l3_added = true;
-                        }
-
-                        final_context.push_str(&format!("[Memory ID: {}]\n", fragment.id));
-                        final_context.push_str(&fragment.text);
-                        final_context.push_str("\n");
-
-                        current_tokens += fragment_tokens;
                     }
                 }
-
-                if current_tokens >= token_limit {
+                if current_tokens >= actual_token_limit {
                     break;
                 }
             }
         }
 
-        // 4. Instrucción Final (L1)
-        if has_l2 || l3_added {
-            final_context.push_str("\n");
+        // L2 CONTEXT / CHAT HISTORY - Lowest Priority (Se trunca desde el más antiguo)
+        let tenant_root = format!("./users/{}/workspace", tenant_id);
+        let mut has_l2 = false;
+        let mut l2_str = String::new();
+
+        for ref_uri in &pcb.memory_pointers.l2_context_refs {
+            if ref_uri.starts_with("file://") {
+                if current_tokens >= actual_token_limit {
+                    if !has_l2 {
+                        l2_str.push_str("\n## ATTACHED CONTEXT\n");
+                        has_l2 = true;
+                    }
+                    l2_str.push_str(&format!(
+                        "[SYSTEM: {} omitido por falta de memoria]\n",
+                        ref_uri
+                    ));
+                    continue;
+                }
+
+                let path_part = &ref_uri[7..];
+                if !is_safe_path(tenant_id, path_part) {
+                    return Err(VCMError::PathTraversalDetected(path_part.to_string()));
+                }
+
+                let full_path = Path::new(&tenant_root).join(path_part);
+                let metadata = match tokio::fs::metadata(&full_path).await {
+                    Ok(m) => m,
+                    Err(e) => return Err(VCMError::IOError(format!("{}: {}", path_part, e))),
+                };
+
+                if metadata.len() > MAX_FILE_SIZE_BYTES {
+                    warn!(path = %path_part, size = %metadata.len(), "File too large for VCM, skipping.");
+                    if !has_l2 {
+                        l2_str.push_str("\n## ATTACHED CONTEXT\n");
+                        has_l2 = true;
+                    }
+                    l2_str.push_str(&format!(
+                        "[SYSTEM: {} omitido por tamaño excesivo]\n",
+                        ref_uri
+                    ));
+                    continue;
+                }
+
+                let content = match tokio::fs::read_to_string(&full_path).await {
+                    Ok(c) => c,
+                    Err(e) => return Err(VCMError::IOError(format!("{}: {}", path_part, e))),
+                };
+
+                let prefix = format!("[File: {}]\n", path_part);
+                let prefix_tokens = estimate_tokens(&prefix);
+
+                let remaining = actual_token_limit.saturating_sub(current_tokens + prefix_tokens + 5);
+                if remaining == 0 {
+                    if !has_l2 {
+                        l2_str.push_str("\n## ATTACHED CONTEXT\n");
+                        has_l2 = true;
+                    }
+                    l2_str.push_str(&format!(
+                        "[SYSTEM: {} omitido por falta de memoria]\n",
+                        ref_uri
+                    ));
+                    continue;
+                }
+
+                let mut content_to_add = &content[..];
+                let content_tokens = estimate_tokens(content_to_add);
+
+                if content_tokens > remaining {
+                    // Truncar el archivo pero quedarse con la parte del final (mensajes más recientes).
+                    let keep_chars = remaining * 4;
+                    let trim_start = content.len().saturating_sub(keep_chars);
+                    let mut actual_start = trim_start;
+                    while actual_start < content.len() && !content.is_char_boundary(actual_start) {
+                        actual_start += 1;
+                    }
+                    content_to_add = &content[actual_start..];
+
+                    if !has_l2 {
+                        l2_str.push_str("\n## ATTACHED CONTEXT\n");
+                        has_l2 = true;
+                    }
+                    l2_str.push_str(&prefix);
+                    l2_str.push_str("[...truncado por falta de memoria...]\n");
+                    l2_str.push_str(content_to_add);
+                    l2_str.push_str("\n");
+                    current_tokens += estimate_tokens(content_to_add) + prefix_tokens + 5;
+                } else {
+                    if !has_l2 {
+                        l2_str.push_str("\n## ATTACHED CONTEXT\n");
+                        has_l2 = true;
+                    }
+                    l2_str.push_str(&prefix);
+                    l2_str.push_str(content_to_add);
+                    l2_str.push_str("\n");
+                    current_tokens += content_tokens + prefix_tokens;
+                }
+            }
         }
-        final_context.push_str("## INSTRUCTION\n");
+
+        // Ensamblado final muy eficiente
+        let mut final_context = String::with_capacity(actual_token_limit * 4);
+        final_context.push_str(SYSTEM_INSTRUCTIONS);
+        final_context.push('\n');
+
+        if !inlined_str.is_empty() {
+            final_context.push_str(&inlined_str);
+        }
+        if has_l2 {
+            final_context.push_str(&l2_str);
+        }
+        if l3_added {
+            final_context.push_str(&l3_str);
+        }
+
+        final_context.push_str("\n## INSTRUCTION\n");
         final_context.push_str(l1_prompt);
-        final_context.push_str("\n");
+        final_context.push('\n');
 
         Ok(final_context)
     }
@@ -250,7 +296,7 @@ mod tests {
 
         assert!(context.contains("SYSTEM: Aegis Neural Kernel VCM"));
         assert!(context.contains("Summarize this"));
-        // El orden debe ser SYSTEM -> L1 (sin L2 en esta prueba básica)
+        // El orden es SYSTEM -> DAG -> L2 -> L3 -> L1
     }
 
     #[tokio::test]
@@ -265,7 +311,7 @@ mod tests {
         // Crear un archivo temporal con ruta relativa dentro del workspace del tenant
         let file_name = "test_overflow_dummy.txt";
         let full_path = std::path::Path::new(workspace_path).join(file_name);
-        
+
         let mut file = std::fs::File::create(&full_path).unwrap();
         let large_content = "X".repeat(2000); // ~500 tokens
         file.write_all(large_content.as_bytes()).unwrap();
@@ -303,6 +349,19 @@ mod tests {
 
         // No debería fallar, aunque la lista esté vacía.
         assert!(context.contains("Check memory"));
+    }
+
+    #[tokio::test]
+    async fn test_vcm_dag_context_priority() {
+        let vcm = VirtualContextManager::new();
+        let swap = LanceSwapManager::new("./test_users");
+        let mut pcb = PCB::new("DAGProc".into(), 5, "Task".into());
+        pcb.inlined_context.insert("parent_node".into(), "parent_output".into());
+
+        let context = vcm.assemble_context(&pcb, &swap, 1000).await.unwrap();
+        assert!(context.contains("## DAG CONTEXT (DEPENDENCIES)"));
+        assert!(context.contains("[Node: parent_node]"));
+        assert!(context.contains("parent_output"));
     }
 
     #[test]

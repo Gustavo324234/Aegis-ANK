@@ -17,7 +17,7 @@ impl TenantDB {
     /// Aplica la session_key mediante PRAGMA key para desencriptar en reposo.
     pub fn open(tenant_id: &str, session_key: &str) -> Result<Self> {
         let db_path = format!("./users/{}/memory.db", tenant_id);
-        
+
         // Asegurar que el directorio del tenant existe
         if let Some(parent) = Path::new(&db_path).parent() {
             std::fs::create_dir_all(parent)
@@ -52,15 +52,17 @@ impl TenantDB {
 
     /// Crea las tablas necesarias para el estado del Kernel si no existen.
     fn init_schema(&self) -> Result<()> {
-        self.connection.execute(
-            "CREATE TABLE IF NOT EXISTS kv_store (
+        self.connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS kv_store (
                 key TEXT PRIMARY KEY,
                 value TEXT,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
-            [],
-        ).context("Failed to initialize kv_store table")?;
-        
+                [],
+            )
+            .context("Failed to initialize kv_store table")?;
+
         Ok(())
     }
 
@@ -75,7 +77,9 @@ impl TenantDB {
 
     /// Recupera un valor del almacén seguro.
     pub fn get_kv(&self, key: &str) -> Result<Option<String>> {
-        let mut stmt = self.connection.prepare("SELECT value FROM kv_store WHERE key = ?1")?;
+        let mut stmt = self
+            .connection
+            .prepare("SELECT value FROM kv_store WHERE key = ?1")?;
         let mut rows = stmt.query([key])?;
 
         if let Some(row) = rows.next()? {
@@ -95,7 +99,7 @@ mod tests {
     fn test_secure_enclave_decryption_failure() {
         let dir = tempdir().unwrap();
         let base_path = dir.path();
-        
+
         // Cambiamos el CWD o simplemente usamos una ruta controlada para el test
         let tenant_id = "test_user_789";
         let correct_key = "secure_pass_123";
@@ -104,7 +108,7 @@ mod tests {
         // 1. Crear la DB con la llave correcta
         // Mocking the path for the test
         let db_path = base_path.join(format!("{}_memory.db", tenant_id));
-        
+
         {
             let conn = Connection::open(&db_path).unwrap();
             conn.pragma_update(None, "key", correct_key).unwrap();
@@ -115,11 +119,14 @@ mod tests {
         // 2. Intentar abrir con la llave incorrectA y verificar fallo de desencriptación
         let conn_fail = Connection::open(&db_path).unwrap();
         conn_fail.pragma_update(None, "key", wrong_key).unwrap();
-        
+
         // SQLCipher fallará aquí (file is not a database)
         let result = conn_fail.query_row("SELECT count(*) FROM test", [], |_| Ok(()));
-        
-        assert!(result.is_err(), "La base de datos NO debería permitir acceso con llave incorrecta");
+
+        assert!(
+            result.is_err(),
+            "La base de datos NO debería permitir acceso con llave incorrecta"
+        );
     }
 
     #[test]

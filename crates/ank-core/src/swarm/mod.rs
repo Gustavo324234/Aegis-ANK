@@ -114,7 +114,7 @@ impl SwarmManager {
                 match event {
                     ServiceEvent::ServiceResolved(info) => {
                         let remote_id = info.get_property_val_str("node_id").unwrap_or_default();
-                        
+
                         // Seguridad: Evitar auto-descubrimiento en bucle
                         if remote_id == my_id || remote_id.is_empty() {
                             continue;
@@ -161,7 +161,9 @@ impl SwarmManager {
                             let mut target_id = None;
                             {
                                 let mut nodes = nodes_ref.write().await;
-                                if let Some((id, meta)) = nodes.iter_mut().find(|(_, m)| m.instance_name == name_ref) {
+                                if let Some((id, meta)) =
+                                    nodes.iter_mut().find(|(_, m)| m.instance_name == name_ref)
+                                {
                                     meta.status = NodeStatus::Suspect;
                                     target_id = Some(id.clone());
                                     warn!(id = %id, "Node pulse lost. Entering grace period.");
@@ -169,8 +171,11 @@ impl SwarmManager {
                             }
 
                             if let Some(id) = target_id {
-                                tokio::time::sleep(Duration::from_secs(HEARTBEAT_TOLERANCE_SECONDS)).await;
-                                
+                                tokio::time::sleep(Duration::from_secs(
+                                    HEARTBEAT_TOLERANCE_SECONDS,
+                                ))
+                                .await;
+
                                 let mut nodes = nodes_ref.write().await;
                                 if let Some(meta) = nodes.get_mut(&id) {
                                     if meta.status == NodeStatus::Suspect {
@@ -200,25 +205,27 @@ mod tests {
     async fn test_swarm_registry_flow() {
         let manager = SwarmManager::new("node-alpha".into(), 50051, 3, 32, 48).unwrap();
         assert_eq!(manager.local_node_id, "node-alpha");
-        
+
         // Simulación de ruteo
         {
             let mut nodes = manager.active_nodes.write().await;
-            nodes.insert("node-beta".into(), NodeMetadata {
-                node_id: "node-beta".into(),
-                instance_name: "ank-node-beta.local.".into(),
-                ip_address: "192.168.1.10".into(),
-                grpc_port: 50051,
-                hardware_tier: 2,
-                cpu_cores: 8,
-                vram_gb: 12,
-                status: NodeStatus::Ready,
-                last_seen: Utc::now(),
-            });
+            nodes.insert(
+                "node-beta".into(),
+                NodeMetadata {
+                    node_id: "node-beta".into(),
+                    instance_name: "ank-node-beta.local.".into(),
+                    ip_address: "192.168.1.10".into(),
+                    grpc_port: 50051,
+                    hardware_tier: 2,
+                    cpu_cores: 8,
+                    vram_gb: 12,
+                    status: NodeStatus::Ready,
+                    last_seen: Utc::now(),
+                },
+            );
         }
-        
+
         let nodes = manager.active_nodes.read().await;
         assert!(nodes.contains_key("node-beta"));
     }
 }
-

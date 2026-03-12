@@ -6,11 +6,14 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{info, warn};
+#[cfg(feature = "local_voice")]
 use webrtc_vad::{SampleRate, Vad, VadConfig, VadMode};
+#[cfg(feature = "local_voice")]
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::server::CitadelAuth;
 
+#[cfg(feature = "local_voice")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum VadState {
     Silence,
@@ -21,12 +24,16 @@ use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 pub struct AnkSirenService {
+    #[allow(dead_code)]
     scheduler_tx: mpsc::Sender<SchedulerEvent>,
+    #[cfg(feature = "local_voice")]
     whisper_ctx: Arc<WhisperContext>,
+    #[allow(dead_code)]
     event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<ank_proto::v1::TaskEvent>>>>>,
 }
 
 impl AnkSirenService {
+    #[cfg(feature = "local_voice")]
     pub fn new(
         scheduler_tx: mpsc::Sender<SchedulerEvent>,
         event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<ank_proto::v1::TaskEvent>>>>>,
@@ -45,12 +52,229 @@ impl AnkSirenService {
             event_broker,
         })
     }
+
+    #[cfg(not(feature = "local_voice"))]
+    pub fn new(
+        scheduler_tx: mpsc::Sender<SchedulerEvent>,
+        event_broker: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<ank_proto::v1::TaskEvent>>>>>,
+    ) -> anyhow::Result<Self> {
+        let api_url = std::env::var("AEGIS_VOICE_API_URL").ok();
+        let api_key = std::env::var("AEGIS_VOICE_API_KEY").ok();
+        
+        let cloud_voice = if let (Some(url), Some(key)) = (api_url, api_key) {
+            match ank_core::chal::drivers::cloud_voice::CloudVoiceDriver::new(url, key) {
+                Ok(driver) => Some(Arc::new(driver)),
+                Err(e) => {
+                    tracing::warn!("Failed to initialize CloudVoiceDriver: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        Ok(Self {
+            scheduler_tx,
+            cloud_voice,
+            event_broker,
+        })
+    }
 }
 
 #[tonic::async_trait]
 impl SirenService for AnkSirenService {
     type SirenStreamStream = ReceiverStream<Result<SirenEvent, Status>>;
 
+    #[cfg(not(feature = "local_voice"))]
+    async fn siren_stream(
+        &self,
+        request: Request<Streaming<AudioChunk>>,
+    ) -> Result<Response<Self::SirenStreamStream>, Status> {
+        let auth = request
+            .extensions()
+            .get::<CitadelAuth>()
+            .cloned()
+            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
+
+        let cloud_driver = match self.cloud_voice.clone() {
+            Some(driver) => driver,
+            None => return Err(Status::unimplemented("Módulo de voz local deshabilitado y faltan credenciales AEGIS_VOICE_API_URL y AEGIS_VOICE_API_KEY.")),
+        };
+
+        info!("Siren stream connected (Cloud) for Tenant: {}", auth.tenant_id);
+
+        let mut in_stream = request.into_inner();
+        let (tx_chunks, mut rx_chunks) = mpsc::channel::<AudioChunk>(200);
+        let (tx_events, rx_events) = mpsc::channel::<Result<SirenEvent, Status>>(200);
+
+        let tx_events_consumer = tx_events.clone();
+        tokio::spawn(async move {
+            loop {
+                match in_stream.message().await {
+                    Ok(Some(chunk)) => {
+                        if tx_chunks.try_send(chunk).is_err() {
+                            let _ = tx_events_consumer.send(Err(Status::resource_exhausted("Audio buffer full"))).await;
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        warn!("SirenStream gRPC error: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        let tx_events_worker = tx_events.clone();
+        let scheduler_tx = self.scheduler_tx.clone();
+        let event_broker = self.event_broker.clone();
+        
+        tokio::spawn(async move {
+            let mut speech_buffer: Vec<u8> = Vec::with_capacity(16000 * 5 * 2);
+
+            while let Some(chunk) = rx_chunks.recv().await {
+                if chunk.format == "VAD_END_SIGNAL" || (chunk.format == "pcm_16khz_16bit" && chunk.data.is_empty()) {
+                    if speech_buffer.is_empty() {
+                        continue;
+                    }
+                    
+                    let _ = tx_events_worker.send(Ok(SirenEvent {
+                        event_type: "VAD_END".to_string(),
+                        message: "Processing voice via Cloud...".to_string(),
+                        processed_sequence_number: chunk.sequence_number,
+                        tts_audio_chunk: vec![],
+                        sample_rate: 0,
+                    })).await;
+
+                    let captured_audio = std::mem::take(&mut speech_buffer);
+                    let driver_clone = cloud_driver.clone();
+                    let scheduler_tx_clone = scheduler_tx.clone();
+                    let auth_clone = auth.clone();
+                    let tx_events_stt = tx_events_worker.clone();
+                    let seq = chunk.sequence_number;
+                    let event_broker_clone = event_broker.clone();
+
+                    tokio::spawn(async move {
+                        use ank_core::chal::drivers::cloud_voice::VoiceDriver;
+
+                        let _ = tx_events_stt.try_send(Ok(SirenEvent {
+                            event_type: "STT_START".to_string(),
+                            message: "Transcribing with Cloud...".to_string(),
+                            processed_sequence_number: seq,
+                            tts_audio_chunk: vec![],
+                            sample_rate: 0,
+                        }));
+
+                        match driver_clone.transcribe(captured_audio).await {
+                            Ok(text) => {
+                                let text = text.trim().to_string();
+                                if text.is_empty() {
+                                    return;
+                                }
+
+                                info!("STT Cloud Result: '{}' (Tenant: {})", text, auth_clone.tenant_id);
+
+                                let mut pcb = CorePCB::new("Voice Command".to_string(), 10, text.clone());
+                                pcb.tenant_id = Some(auth_clone.tenant_id);
+                                pcb.session_key = Some(auth_clone.session_key);
+                                let pid_clone = pcb.pid.clone();
+
+                                let _ = scheduler_tx_clone.send(SchedulerEvent::ScheduleTask(Box::new(pcb))).await;
+
+                                let message_json = serde_json::json!({
+                                    "transcript": text,
+                                    "pid": pid_clone
+                                }).to_string();
+
+                                let _ = tx_events_stt.try_send(Ok(SirenEvent {
+                                    event_type: "STT_DONE".to_string(),
+                                    message: message_json,
+                                    processed_sequence_number: seq,
+                                    tts_audio_chunk: vec![],
+                                    sample_rate: 0,
+                                }));
+
+                                let (tx_task, mut rx_task) = tokio::sync::mpsc::channel(100);
+                                {
+                                    let mut broker = event_broker_clone.write().await;
+                                    broker.entry(pid_clone.clone()).or_insert_with(Vec::new).push(tx_task);
+                                }
+
+                                let (tts_tx, mut rx_tts) = tokio::sync::mpsc::channel::<String>(100);
+                                
+                                // Dedicated TTS worker for cloud
+                                let tts_driver = driver_clone.clone();
+                                let tts_siren_tx = tx_events_stt.clone();
+                                tokio::spawn(async move {
+                                    let mut tts_seq = seq;
+                                    while let Some(sentence) = rx_tts.recv().await {
+                                        info!("TTS Cloud Synthesizing: '{}'", sentence);
+                                        match tts_driver.synthesize(sentence.clone()).await {
+                                            Ok(audio_bytes) => {
+                                                tts_seq += 1;
+                                                let event = SirenEvent {
+                                                    event_type: "TTS_AUDIO".to_string(),
+                                                    message: sentence,
+                                                    processed_sequence_number: tts_seq,
+                                                    tts_audio_chunk: audio_bytes,
+                                                    sample_rate: 22050, // format returned by OpenAI is mp3 actually, but siren accepts binary
+                                                };
+                                                if tts_siren_tx.try_send(Ok(event)).is_err() {
+                                                    warn!("Siren Stream disconnected. Terminating TTS worker.");
+                                                    break;
+                                                }
+                                            }
+                                            Err(e) => {
+                                                warn!("Cloud TTS Error: {:?}", e);
+                                            }
+                                        }
+                                    }
+                                });
+                                
+                                let mut accumulator = crate::tts::SentenceAccumulator::new(tts_tx);
+
+                                while let Some(task_event) = rx_task.recv().await {
+                                    if let Some(payload) = task_event.payload {
+                                        match payload {
+                                            ank_proto::v1::task_event::Payload::Thought(thought) => {
+                                                accumulator.push_token(&thought).await;
+                                            }
+                                            ank_proto::v1::task_event::Payload::StatusUpdate(update) => {
+                                                if update.state == ank_proto::v1::ProcessState::StateCompleted as i32 
+                                                    || update.state == ank_proto::v1::ProcessState::StateTerminated as i32 {
+                                                    accumulator.flush().await;
+                                                    break;
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Cloud STT Error: {:?}", e);
+                                let _ = tx_events_stt.try_send(Ok(SirenEvent {
+                                    event_type: "STT_ERROR".to_string(),
+                                    message: format!("STT Error: {:?}", e),
+                                    processed_sequence_number: seq,
+                                    tts_audio_chunk: vec![],
+                                    sample_rate: 0,
+                                }));
+                            }
+                        }
+                    });
+
+                } else if chunk.format == "pcm_16khz_16bit" {
+                    speech_buffer.extend_from_slice(&chunk.data);
+                }
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx_events)))
+    }
+
+    #[cfg(feature = "local_voice")]
     async fn siren_stream(
         &self,
         request: Request<Streaming<AudioChunk>>,
@@ -299,6 +523,7 @@ mod tests {
     use std::time::Duration;
 
     #[tokio::test]
+    #[cfg(feature = "local_voice")]
     async fn test_siren_stream_latency_and_backpressure() -> Result<()> {
         let (tx, _rx) = mpsc::channel(1);
         // Note: This test will fail if model is missing, which is correct for SRE Zero-Panic/Fail-Fast

@@ -20,7 +20,8 @@ WORKDIR /app
 COPY . .
 
 # Build the ank-server
-RUN cargo build --release -p ank-server
+ARG FEATURES=""
+RUN cargo build --release -p ank-server ${FEATURES:+--features $FEATURES}
 
 # Stage 2: Runtime environment
 FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04

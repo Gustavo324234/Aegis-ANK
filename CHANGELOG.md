@@ -1,5 +1,44 @@
 # Aegis Neural Kernel (ANK) - Changelog
 
+## [2.1.0] - Unreleased
+
+### Added
+- **[ANK-2301] VCM Tensor-Compressor (INT8 Quantization):**
+  - Implemented symmetric Min/Max scaling for vector compression to reduce L3 Swap memory footprint by 75%.
+  - Added `quantize_f32_to_i8` and `dequantize_i8_to_f32` with Zero-Panic division guards.
+  - Refactored `MemoryFragment` to support optional INT8 storage, offloading the original f32 vectors after compression.
+  - Validated mathematical precision with dedicated unit tests for quantization roundtrips.
+- **[ANK-2303] CCSP & Context Slicing (Contextual Canonical State Prioritization):**
+  - Refactored `assemble_context` to implement intelligent token budgeting and hierarchical truncation.
+  - Implemented S-DAG priority: `inlined_context` (DAG Dependencies) is now immutable and prioritized over history and swap.
+  - Added smart truncation for `L2_CONTEXT`: history is sliced from the oldest message (tail-trimming) to preserve recent context while staying under `token_limit`.
+  - Integrated `.env` aware budgeting: dynamically adjusts limits for `CloudOnly` models using `CLOUD_MAX_TOKENS`.
+  - Optimized memory allocation using `String::with_capacity` based on token heuristics to minimize fragmentation.
+
+### Refactored
+- **[ANK-2202] Scatter-Gather Scheduler & S-DAG Synchronization:**
+  - Integrated `GraphManager` into the `CognitiveScheduler` internal state using an `Arc<RwLock<GraphManager>>` for zero-penalty concurrent access.
+  - Implemented the `ProcessCompleted` scheduler event to accurately intercept finished processes and notify the `GraphManager` via `handle_result()`.
+  - Added deterministic anti-deadlock safeguards performing granular lock acquisitions and fast-drops when advancing the S-DAG via `tick()`.
+  - Validated native Context Forwarding, confirming that child PCBs automatically inherit memory pointers (`dependency_[id]`) from completed parallel dependencies before entering the `ready_queue`.
+- **[ANK-2203] Hybrid Sub-Agent Routing (CognitiveHAL):**
+  - Refactored `route_and_execute` to securely manage heterogeneous driver delegation using `ModelPreference`.
+  - Implemented strict Microkernel compliance leveraging `#[cfg(feature = "local_llm")]` to return elegant `HardwareFailure` messages if local execution is requested on a thin build.
+  - Enhanced `HybridSmart` heuristic to dynamically fallback to `cloud-driver` if the local driver is missing or the task's complexity exceeds cognitive thresholds.
+  - Hardened concurrent bounds by explicitly scoping the `shared_pcb.read().await` lock, releasing it *before* the inference stream invocation.
+- **[ANK-2201] Grammar-Based S-DAG Planner & Hybrid Routing:**
+  - Expanded `DagNode` struct to include `required_model: ModelPreference`.
+  - Upgraded the DAG `GraphManager` to propagate `required_model` into the resulting `PCB`'s `model_pref` feature during parallel execution mappings via `tick()`.
+  - Created a built-in `generate_dag_from_prompt` method with a zero-panic SRE fallback mechanism. If the system fails to parse an S-DAG natively using `serde_json`, it constructs a deterministic monolithic single-node execution graph fallback with `HybridSmart` to ensure 100% stability.
+- **[ANK-2003] Siren V2 - Pluggable Audio Architecture:**
+  - Rediseñado el protocolo Siren para instanciar automáticamente el `CloudVoiceDriver` cuando se compila sin `local_voice`.
+  - Transcripción asíncrona mediante `/v1/audio/transcriptions` utilizando `reqwest::multipart`.
+  - Síntesis de voz dinámica apuntando a `/v1/audio/speech`, manteniendo TTS concurrente y delegando bloqueos a la red.
+  - Implementada lógica de VAD diferida consumiendo la señal de control "VAD_END_SIGNAL" desde la Shell, acumulando los chunks eficientemente cuando el driver C++ no está disponible.
+- **[ANK-2002] Modularización de Dependencias Pesadas (Cargo Features):**
+  - Transformado el Kernel en un modelo "Microkernel" activando bindings pesados de C++ (`llama-cpp-2`, `whisper-rs`, `webrtc-vad`) exclusivamente a través de los *features* `local_llm`, `local_voice` y `full_local`.
+  - Aplicados mecanismos *Graceful Degradation* (Zero-Panic) para retornar estatus `unimplemented` en servicios gRPC nativos si los módulos locales no están incluidos en el *build*.
+
 ## [1.5.1] - Unreleased
 
 ### Added

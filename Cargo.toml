@@ -32,7 +32,7 @@ futures = "0.3"
 llama-cpp-2 = "0.1" 
 # lancedb for Vectorized Memory (VCM)
 # lancedb = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["native-tls", "stream", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "multipart"] }
 
 # --- System & OS Level ---
 git2 = "0.19" # For workspace/project awareness

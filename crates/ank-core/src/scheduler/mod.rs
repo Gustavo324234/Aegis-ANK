@@ -1,13 +1,14 @@
+use crate::dag::{DagNodeStatus, GraphManager, NodeResult};
+use crate::pcb::{ProcessState, PCB};
+use crate::swarm::client::SwarmClient;
+use crate::swarm::{NodeStatus, SwarmManager};
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
-use crate::pcb::{ProcessState, PCB};
-use crate::swarm::{NodeStatus, SwarmManager};
-use crate::swarm::client::SwarmClient;
-use tracing::{info, instrument, warn, error};
+use tracing::{error, info, instrument, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModelPreference {
@@ -43,6 +44,7 @@ pub enum SchedulerEvent {
     DispatchLocal(Box<PCB>), // Nuevo: Re-encolado forzado para ejecución local
     SyscallCompleted { pid: String, result: String },
     RemoteEvent(String, ank_proto::v1::TaskEvent), // Nuevo: Evento interceptado de un nodo remoto
+    ProcessCompleted { pid: String, output: String },
     PreemptCurrent,
     TerminateProcess(String),
     ListProcesses(tokio::sync::oneshot::Sender<Vec<PCB>>),
@@ -61,6 +63,8 @@ pub struct CognitiveScheduler {
     pub swarm_client: Arc<SwarmClient>,
     // Canal para auto-enviarse eventos de recovery
     pub internal_tx: Option<mpsc::Sender<SchedulerEvent>>,
+    // Grafo de ejecución S-DAG
+    pub graph_manager: Arc<RwLock<GraphManager>>,
 }
 
 impl CognitiveScheduler {
@@ -74,6 +78,7 @@ impl CognitiveScheduler {
             swarm_manager: None,
             swarm_client: Arc::new(SwarmClient),
             internal_tx: None,
+            graph_manager: Arc::new(RwLock::new(GraphManager::new())),
         }
     }
 
@@ -149,12 +154,33 @@ impl CognitiveScheduler {
                     match payload {
                         ank_proto::v1::task_event::Payload::Output(result) => {
                             info!(pid = %pid, "Remote process completed with output.");
-                            // Si el nodo remoto completó la tarea, lo reinyectamos simulando
-                            // una SyscallCompleted para que vuelva a la cola o notifique a DAG
                             if let Some(pcb) = self.process_table.get_mut(&pid) {
                                 pcb.state = ProcessState::Completed;
-                                pcb.registers.temp_vars.insert("final_output".to_string(), result);
-                                // En una implementación real, aquí notificaríamos al GraphManager
+                                pcb.registers
+                                    .temp_vars
+                                    .insert("final_output".to_string(), result.clone());
+                            }
+
+                            // Anti-Deadlock: Bloqueo super corto para reportar resultado
+                            {
+                                let mut lock = self.graph_manager.write().await;
+                                let _ = lock.handle_result(NodeResult {
+                                    node_id: pid.clone(),
+                                    output: result,
+                                    status: DagNodeStatus::Completed,
+                                });
+                            }
+
+                            // Extraemos nuevos procesos listos
+                            let new_pcbs = {
+                                let mut lock = self.graph_manager.write().await;
+                                lock.tick()
+                            };
+
+                            for mut pcb in new_pcbs {
+                                pcb.state = ProcessState::Ready;
+                                self.process_table.insert(pcb.pid.clone(), pcb.clone());
+                                self.ready_queue.push(pcb);
                             }
                         }
                         ank_proto::v1::task_event::Payload::Syscall(syscall) => {
@@ -164,6 +190,37 @@ impl CognitiveScheduler {
                             info!(pid = %pid, "Ignored remote status payload.");
                         }
                     }
+                }
+            }
+            SchedulerEvent::ProcessCompleted { pid, output } => {
+                info!(pid = %pid, "Process completed locally. Notifying DAG.");
+                if let Some(pcb) = self.process_table.get_mut(&pid) {
+                    pcb.state = ProcessState::Completed;
+                    pcb.registers
+                        .temp_vars
+                        .insert("final_output".to_string(), output.clone());
+                }
+
+                // Anti-Deadlock: Bloqueo super corto
+                {
+                    let mut lock = self.graph_manager.write().await;
+                    let _ = lock.handle_result(NodeResult {
+                        node_id: pid.clone(),
+                        output,
+                        status: DagNodeStatus::Completed,
+                    });
+                }
+
+                // Anti-Deadlock: Nuevo bloqueo para ver si hay tareas hijas listas
+                let new_pcbs = {
+                    let mut lock = self.graph_manager.write().await;
+                    lock.tick()
+                };
+
+                for mut pcb in new_pcbs {
+                    pcb.state = ProcessState::Ready;
+                    self.process_table.insert(pcb.pid.clone(), pcb.clone());
+                    self.ready_queue.push(pcb);
                 }
             }
             SchedulerEvent::PreemptCurrent => {
@@ -197,12 +254,13 @@ impl CognitiveScheduler {
                     if let Some(swarm) = &self.swarm_manager {
                         let nodes = swarm.active_nodes.read().await;
                         // Buscamos un nodo con Tier > 1 que esté Ready
-                        let target_node = nodes.values()
+                        let target_node = nodes
+                            .values()
                             .find(|n| n.hardware_tier > 1 && n.status == NodeStatus::Ready);
 
                         if let Some(node) = target_node {
                             info!(pid = %pcb.pid, target = %node.node_id, "High complexity detected. Delegating to Swarm.");
-                            
+
                             let client = self.swarm_client.clone();
                             let node_ip = node.ip_address.clone();
                             let node_port = node.grpc_port;
@@ -219,21 +277,28 @@ impl CognitiveScheduler {
                                     let (dummy_tx, _) = mpsc::channel(1);
                                     dummy_tx
                                 };
-                                
-                                if let Err(e) = client.teleport(&node_ip, node_port, pcb.clone(), event_tx).await {
+
+                                if let Err(e) = client
+                                    .teleport(&node_ip, node_port, pcb.clone(), event_tx)
+                                    .await
+                                {
                                     error!(pid = %pcb.pid, error = %e, "Teleportation failed. Initiating Fallback.");
-                                    
+
                                     // Marcar nodo como sospechoso
                                     {
                                         let mut nodes = swarm_mgr_ref.active_nodes.write().await;
-                                        if let Some(meta) = nodes.values_mut().find(|n| n.ip_address == node_ip) {
+                                        if let Some(meta) =
+                                            nodes.values_mut().find(|n| n.ip_address == node_ip)
+                                        {
                                             meta.status = NodeStatus::Suspect;
                                         }
                                     }
 
                                     // RESILIENCIA EXTREMA: Devolver el PCB a la cola local
                                     if let Some(tx) = recovery_tx {
-                                        let _ = tx.send(SchedulerEvent::DispatchLocal(Box::new(pcb))).await;
+                                        let _ = tx
+                                            .send(SchedulerEvent::DispatchLocal(Box::new(pcb)))
+                                            .await;
                                     }
                                 }
                             });
@@ -283,12 +348,21 @@ mod tests {
 
         // Verificamos orden de salida
         let first = scheduler.ready_queue.pop().unwrap();
-        assert_eq!(first.process_name, "task-high", "Prioridad 10 debe salir primero");
+        assert_eq!(
+            first.process_name, "task-high",
+            "Prioridad 10 debe salir primero"
+        );
 
         let second = scheduler.ready_queue.pop().unwrap();
-        assert_eq!(second.process_name, "task-low-1", "FCFS para prioridad 5 (1)");
+        assert_eq!(
+            second.process_name, "task-low-1",
+            "FCFS para prioridad 5 (1)"
+        );
 
         let third = scheduler.ready_queue.pop().unwrap();
-        assert_eq!(third.process_name, "task-low-2", "FCFS para prioridad 5 (2)");
+        assert_eq!(
+            third.process_name, "task-low-2",
+            "FCFS para prioridad 5 (2)"
+        );
     }
 }

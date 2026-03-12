@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use thiserror::Error;
+use tokio::sync::RwLock;
 use tokio_stream::Stream;
 use tracing::info;
 
@@ -85,7 +85,7 @@ pub struct CognitiveHAL {
 impl CognitiveHAL {
     pub fn new(plugin_manager: Arc<RwLock<PluginManager>>) -> Self {
         let mut drivers: HashMap<String, Box<dyn InferenceDriver>> = HashMap::new();
-        
+
         // Auto-Register CloudDriver if environment variables are populated
         if let Some(cloud_driver) = crate::chal::drivers::CloudProxyDriver::from_env() {
             drivers.insert("cloud-driver".to_string(), Box::new(cloud_driver));
@@ -99,8 +99,10 @@ impl CognitiveHAL {
     }
 
     pub fn update_cloud_credentials(&mut self, api_url: String, model: String, api_key: String) {
-        let cloud_driver = crate::chal::drivers::CloudProxyDriver::new(api_url, api_key, model.clone());
-        self.drivers.insert("cloud-driver".to_string(), Box::new(cloud_driver));
+        let cloud_driver =
+            crate::chal::drivers::CloudProxyDriver::new(api_url, api_key, model.clone());
+        self.drivers
+            .insert("cloud-driver".to_string(), Box::new(cloud_driver));
         tracing::info!(model = %model, "CloudProxyDriver credentials updated dynamically and driver re-registered in HAL.");
     }
 
@@ -131,47 +133,69 @@ impl CognitiveHAL {
         // 2. Lógica de selección de driver (ya no depende del lock activo del PCB)
         let driver_id = match model_pref {
             ModelPreference::LocalOnly => {
-                info!(pid = %pid, "Policy: LOCAL_ONLY. Selecting local-driver.");
-                "local-driver"
+                #[cfg(not(feature = "local_llm"))]
+                {
+                    return Err(SystemError::HardwareFailure(
+                        "Motor local no compilado. Reinicie con feature 'local_llm' o use Cloud."
+                            .to_string(),
+                    ));
+                }
+                #[cfg(feature = "local_llm")]
+                {
+                    info!(pid = %pid, "Policy: LOCAL_ONLY. Selecting local-driver.");
+                    "local-driver"
+                }
             }
             ModelPreference::CloudOnly => {
                 info!(pid = %pid, "Policy: CLOUD_ONLY. Selecting cloud-driver.");
                 "cloud-driver"
             }
             ModelPreference::HybridSmart => {
-                // Heurística de complejidad
-                if priority > 8 || instruction.len() > 1000 {
+                // Heurística de complejidad y disponibilidad local
+                let is_complex = priority > 8 || instruction.len() > 1000;
+                let has_local_driver =
+                    cfg!(feature = "local_llm") && self.drivers.contains_key("local-driver");
+
+                if is_complex || !has_local_driver {
                     info!(
                         pid = %pid,
                         priority = priority,
-                        "HybridSmart: High complexity. Routing to CLOUD."
+                        has_local_driver = has_local_driver,
+                        "HybridSmart: Routing to CLOUD (fallback or complex)."
                     );
                     "cloud-driver"
                 } else {
                     info!(
                         pid = %pid,
                         priority = priority,
-                        "HybridSmart: Low complexity. Routing to LOCAL."
+                        "HybridSmart: Low complexity and local driver available. Routing to LOCAL."
                     );
                     "local-driver"
                 }
             }
         };
 
-        let driver = self
-            .drivers
-            .get(driver_id)
-            .ok_or_else(|| SystemError::DriverOffline(driver_id.to_string()))?;
+        let driver = self.drivers.get(driver_id).ok_or_else(|| {
+            if driver_id == "cloud-driver" {
+                SystemError::HardwareFailure(
+                    "Driver cloud no configurado o sin credenciales.".to_string(),
+                )
+            } else {
+                SystemError::DriverOffline(driver_id.to_string())
+            }
+        })?;
 
         // 3. Ensamblaje del "Master Prompt" (Prompt Injection)
         // Concatenamos: [Master Rules] + [Active Plugins] + [Process Instruction]
-        let tool_prompt = self.plugin_manager.read().await.get_available_tools_prompt();
-        
+        let tool_prompt = self
+            .plugin_manager
+            .read()
+            .await
+            .get_available_tools_prompt();
+
         let final_prompt = format!(
             "{}\n{}\n\n[USER_PROCESS_INSTRUCTION]\n{}",
-            SYSTEM_PROMPT_MASTER,
-            tool_prompt,
-            instruction
+            SYSTEM_PROMPT_MASTER, tool_prompt, instruction
         );
 
         // 4. Ejecutar generación

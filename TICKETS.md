@@ -5,6 +5,11 @@ Este archivo es la fuente de verdad del progreso del Aegis Neural Kernel. El pro
 El Protocolo Siren ha sido implementado exitosamente, habilitando soporte para audio mediante gRPC estricto y políticas de backpressure que garantizan tolerancia a fallos.
 
 🟩 DONE (Completado)
+- [ANK-2301] VCM Tensor-Compressor (INT8 Quantization) (v0.3.0)
+- [ANK-2203] Hybrid Sub-Agent Routing (CognitiveHAL)
+- [ANK-2202] Scatter-Gather Scheduler & S-DAG Synchronization
+- [ANK-2201] Grammar-Based S-DAG Planner & Hybrid Routing
+- [ANK-2003] Siren V2 (Pluggable Audio Architecture)
 - [SEC-005] Insecure Hashing (Migrado a Argon2id)
 - [SEC-006] Session Key Leak en telemetría (Campo removido del Protobuf)
 - [SEC-009] Tenant Password Persistence en DB (Validación SRE configurada)

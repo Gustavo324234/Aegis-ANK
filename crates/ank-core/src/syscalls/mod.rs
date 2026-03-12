@@ -41,9 +41,9 @@ pub enum SyscallError {
     InternalError(String),
 }
 
-use crate::vcm::VirtualContextManager;
-use crate::vcm::swap::LanceSwapManager;
 use crate::scribe::ScribeManager;
+use crate::vcm::swap::LanceSwapManager;
+use crate::vcm::VirtualContextManager;
 
 /// --- SYSCALL EXECUTOR ---
 /// El ejecutor de Syscalls es el puente entre el parser y los subsistemas del Kernel.
@@ -69,7 +69,11 @@ impl SyscallExecutor {
         }
     }
 
-    pub async fn execute(&self, pcb: &crate::pcb::PCB, syscall: Syscall) -> Result<String, SyscallError> {
+    pub async fn execute(
+        &self,
+        pcb: &crate::pcb::PCB,
+        syscall: Syscall,
+    ) -> Result<String, SyscallError> {
         let tenant_id = pcb.tenant_id.as_deref().unwrap_or("default");
 
         match syscall {
@@ -81,16 +85,25 @@ impl SyscallExecutor {
                 let result = pm
                     .execute_plugin(tenant_id, &plugin_name, &args_json)
                     .await
-                    .map_err(|e: crate::plugins::PluginError| SyscallError::PluginError(e.to_string()))?;
+                    .map_err(|e: crate::plugins::PluginError| {
+                        SyscallError::PluginError(e.to_string())
+                    })?;
 
                 Ok(format!("[SYSTEM_RESULT: {}]", result))
             }
             Syscall::ReadFile { uri } => {
                 // Validación y Ensamblaje vía VCM
-                let file_path = if uri.starts_with("file://") { &uri[7..] } else { &uri };
-                
+                let file_path = if uri.starts_with("file://") {
+                    &uri[7..]
+                } else {
+                    &uri
+                };
+
                 if !crate::vcm::is_safe_path(tenant_id, file_path) {
-                    return Err(SyscallError::SecurityViolation(format!("Path traversal attempt blocked: {}", file_path)));
+                    return Err(SyscallError::SecurityViolation(format!(
+                        "Path traversal attempt blocked: {}",
+                        file_path
+                    )));
                 }
 
                 // Intentamos leer el archivo usando el motor de contexto (VCM)
@@ -98,25 +111,45 @@ impl SyscallExecutor {
                 let tenant_root = format!("./users/{}/workspace", tenant_id);
                 let full_path = std::path::Path::new(&tenant_root).join(file_path);
 
-                let content = tokio::fs::read_to_string(&full_path)
-                    .await
-                    .map_err(|e: std::io::Error| SyscallError::IOError(format!("Read failed for {}: {}", uri, e)))?;
+                let content =
+                    tokio::fs::read_to_string(&full_path)
+                        .await
+                        .map_err(|e: std::io::Error| {
+                            SyscallError::IOError(format!("Read failed for {}: {}", uri, e))
+                        })?;
 
                 Ok(format!("[SYSTEM_RESULT: Content of {}]\n{}", uri, content))
             }
-            Syscall::WriteFile { uri, content, metadata } => {
+            Syscall::WriteFile {
+                uri,
+                content,
+                metadata,
+            } => {
                 // Mediación vía The Scribe para trazabilidad multi-tenant
-                let file_path = if uri.starts_with("file://") { &uri[7..] } else { &uri };
-                
-                if !crate::vcm::is_safe_path(tenant_id, file_path) {
-                    return Err(SyscallError::SecurityViolation(format!("Path traversal attempt blocked: {}", file_path)));
-                }
-                
-                self.scribe.write_and_commit(tenant_id, file_path, content.as_bytes(), metadata)
-                    .await
-                    .map_err(|e: crate::scribe::ScribeError| SyscallError::IOError(format!("Scribe write failed: {}", e)))?;
+                let file_path = if uri.starts_with("file://") {
+                    &uri[7..]
+                } else {
+                    &uri
+                };
 
-                Ok(format!("[SYSTEM_RESULT: File {} written and committed to Git]", uri))
+                if !crate::vcm::is_safe_path(tenant_id, file_path) {
+                    return Err(SyscallError::SecurityViolation(format!(
+                        "Path traversal attempt blocked: {}",
+                        file_path
+                    )));
+                }
+
+                self.scribe
+                    .write_and_commit(tenant_id, file_path, content.as_bytes(), metadata)
+                    .await
+                    .map_err(|e: crate::scribe::ScribeError| {
+                        SyscallError::IOError(format!("Scribe write failed: {}", e))
+                    })?;
+
+                Ok(format!(
+                    "[SYSTEM_RESULT: File {} written and committed to Git]",
+                    uri
+                ))
             }
         }
     }
@@ -125,9 +158,12 @@ impl SyscallExecutor {
     /// Delega en el PluginManager para mantener una única fuente de verdad sobre políticas de red.
     pub async fn fetch_url_safe(&self, url_str: &str) -> Result<String, SyscallError> {
         let pm = self.plugin_manager.read().await;
-        pm.fetch_url_safe(url_str).await
+        pm.fetch_url_safe(url_str)
+            .await
             .map_err(|e: crate::plugins::PluginError| match e {
-                crate::plugins::PluginError::SecurityViolation(msg) => SyscallError::SecurityViolation(msg),
+                crate::plugins::PluginError::SecurityViolation(msg) => {
+                    SyscallError::SecurityViolation(msg)
+                }
                 _ => SyscallError::IOError(e.to_string()),
             })
     }
@@ -206,14 +242,19 @@ static WRITE_RE: OnceLock<Regex> = OnceLock::new();
 /// Parser de Syscalls Cognitivas.
 /// Detecta llamadas estructuradas dentro del stream de texto de la IA.
 pub fn parse_syscall(text: &str) -> Option<Syscall> {
-    let plugin_re = PLUGIN_RE
-        .get_or_init(|| Regex::new(r#"\[SYS_CALL_PLUGIN\("([^"]+)",\s*(\{.*?\})\)\]"#).expect("FATAL: Invalid static regex pattern"));
+    let plugin_re = PLUGIN_RE.get_or_init(|| {
+        Regex::new(r#"\[SYS_CALL_PLUGIN\("([^"]+)",\s*(\{.*?\})\)\]"#)
+            .expect("FATAL: Invalid static regex pattern")
+    });
 
-    let read_re = READ_RE.get_or_init(|| Regex::new(r#"\[READ_FILE\("([^"]+)"\)\]"#).expect("FATAL: Invalid static regex pattern"));
+    let read_re = READ_RE.get_or_init(|| {
+        Regex::new(r#"\[READ_FILE\("([^"]+)"\)\]"#).expect("FATAL: Invalid static regex pattern")
+    });
 
     let write_re = WRITE_RE.get_or_init(|| {
         // Formato esperado: [WRITE_FILE("path", "content", {"task_id": "..."})]
-        Regex::new(r#"\[WRITE_FILE\("([^"]+)",\s*"([\s\S]*?)",\s*(\{.*?\})\)\]"#).expect("FATAL: Invalid static regex pattern")
+        Regex::new(r#"\[WRITE_FILE\("([^"]+)",\s*"([\s\S]*?)",\s*(\{.*?\})\)\]"#)
+            .expect("FATAL: Invalid static regex pattern")
     });
 
     // 1. Check for Plugin Call
@@ -326,9 +367,12 @@ mod tests {
         // Intentar acceder a localhost
         let res = executor.fetch_url_safe("http://127.0.0.1:8080/admin").await;
         assert!(matches!(res, Err(SyscallError::SecurityViolation(_))));
-        
+
         // Intentar acceder a red privada (RFC 1918)
         let res_private = executor.fetch_url_safe("http://192.168.1.1/config").await;
-        assert!(matches!(res_private, Err(SyscallError::SecurityViolation(_))));
+        assert!(matches!(
+            res_private,
+            Err(SyscallError::SecurityViolation(_))
+        ));
     }
 }

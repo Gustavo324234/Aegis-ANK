@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
+use tracing::info;
 use wasmtime::{Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::pipe::{MemoryInputPipe, MemoryOutputPipe};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
-use tracing::info;
 
 pub mod watcher;
 
@@ -112,7 +112,11 @@ impl PluginManager {
         &self.engine
     }
 
-    pub async fn reload_plugin_module(&mut self, path: &str, module: Module) -> Result<(), PluginError> {
+    pub async fn reload_plugin_module(
+        &mut self,
+        path: &str,
+        module: Module,
+    ) -> Result<(), PluginError> {
         let name = Path::new(path)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -127,7 +131,13 @@ impl PluginManager {
             parameter_example: "{}".to_string(),
         };
 
-        self.plugins.insert(name.clone(), Plugin { metadata: initial_metadata, module });
+        self.plugins.insert(
+            name.clone(),
+            Plugin {
+                metadata: initial_metadata,
+                module,
+            },
+        );
 
         let metadata_input = r#"{"action": "get_metadata"}"#;
         match self.execute_plugin("system", &name, metadata_input).await {
@@ -136,12 +146,27 @@ impl PluginManager {
                     if let Some(data) = resp.get("data").and_then(|d| d.as_object()) {
                         let final_metadata = PluginMetadata {
                             name: name.clone(),
-                            description: data.get("description").and_then(|v| v.as_str()).unwrap_or("No description").to_string(),
-                            version: data.get("version").and_then(|v| v.as_str()).unwrap_or("1.0.0").to_string(),
-                            author: data.get("author").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
-                            parameter_example: data.get("example_json").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string()),
+                            description: data
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("No description")
+                                .to_string(),
+                            version: data
+                                .get("version")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("1.0.0")
+                                .to_string(),
+                            author: data
+                                .get("author")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown")
+                                .to_string(),
+                            parameter_example: data
+                                .get("example_json")
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "{}".to_string()),
                         };
-                        
+
                         if let Some(p) = self.plugins.get_mut(&name) {
                             p.metadata = final_metadata;
                         }
@@ -175,7 +200,13 @@ impl PluginManager {
             parameter_example: "{}".to_string(),
         };
 
-        self.plugins.insert(name.clone(), Plugin { metadata: initial_metadata, module });
+        self.plugins.insert(
+            name.clone(),
+            Plugin {
+                metadata: initial_metadata,
+                module,
+            },
+        );
 
         // 2. Discover metadata running the plugin
         let metadata_input = r#"{"action": "get_metadata"}"#;
@@ -185,12 +216,27 @@ impl PluginManager {
                     if let Some(data) = resp.get("data").and_then(|d| d.as_object()) {
                         let final_metadata = PluginMetadata {
                             name: name.clone(),
-                            description: data.get("description").and_then(|v| v.as_str()).unwrap_or("No description").to_string(),
-                            version: data.get("version").and_then(|v| v.as_str()).unwrap_or("1.0.0").to_string(),
-                            author: data.get("author").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
-                            parameter_example: data.get("example_json").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string()),
+                            description: data
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("No description")
+                                .to_string(),
+                            version: data
+                                .get("version")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("1.0.0")
+                                .to_string(),
+                            author: data
+                                .get("author")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown")
+                                .to_string(),
+                            parameter_example: data
+                                .get("example_json")
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "{}".to_string()),
                         };
-                        
+
                         // Update the map
                         if let Some(p) = self.plugins.get_mut(&name) {
                             p.metadata = final_metadata;
@@ -210,17 +256,23 @@ impl PluginManager {
     pub async fn load_all_from_dir(&mut self, dir_path: &str) -> Result<(), PluginError> {
         let path = Path::new(dir_path);
         if !path.exists() || !path.is_dir() {
-            return Err(PluginError::IOError(format!("Plugin directory not found: {}", dir_path)));
+            return Err(PluginError::IOError(format!(
+                "Plugin directory not found: {}",
+                dir_path
+            )));
         }
 
         for entry in std::fs::read_dir(path).map_err(|e| PluginError::IOError(e.to_string()))? {
             let entry = entry.map_err(|e| PluginError::IOError(e.to_string()))?;
             let path = entry.path();
-            
+
             if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
                 if let Some(path_str) = path.to_str() {
                     self.load_plugin(path_str).await?;
-                    info!("Plugin auto-loaded: {:?}", path.file_name().unwrap_or_default());
+                    info!(
+                        "Plugin auto-loaded: {:?}",
+                        path.file_name().unwrap_or_default()
+                    );
                 }
             }
         }
@@ -243,20 +295,29 @@ impl PluginManager {
         // Si el plugin es std_net, interceptamos el JSON para realizar la descarga en el Host.
         let mut final_input = input_json.to_string();
         if plugin_name == "std_net" {
-            let req: serde_json::Value = serde_json::from_str(input_json)
-                .map_err(|e| PluginError::ExecutionFailed(format!("Invalid JSON for std_net: {}", e)))?;
-            
+            let req: serde_json::Value = serde_json::from_str(input_json).map_err(|e| {
+                PluginError::ExecutionFailed(format!("Invalid JSON for std_net: {}", e))
+            })?;
+
             if let Some(action) = req.get("action").and_then(|a| a.as_str()) {
                 if action != "get_metadata" {
-                    let url = req.get("url").and_then(|u| u.as_str())
-                        .or_else(|| req.get("params").and_then(|p| p.get("url")).and_then(|u| u.as_str()))
+                    let url = req
+                        .get("url")
+                        .and_then(|u| u.as_str())
+                        .or_else(|| {
+                            req.get("params")
+                                .and_then(|p| p.get("url"))
+                                .and_then(|u| u.as_str())
+                        })
                         .ok_or_else(|| {
-                            PluginError::ExecutionFailed("std_net requires 'url' parameter".to_string())
+                            PluginError::ExecutionFailed(
+                                "std_net requires 'url' parameter".to_string(),
+                            )
                         })?;
 
                     // El Kernel realiza la descarga segura
                     let raw_html = self.fetch_url_safe(url).await?;
-                    
+
                     // Empaquetamos el HTML para el WASM SDK
                     let wrapped = serde_json::json!({
                         "action": "parse",
@@ -275,10 +336,14 @@ impl PluginManager {
 
         // 2. Construir el contexto WASI (Dynamic Jailing)
         let workspace_path = format!("./users/{}/workspace", tenant_id);
-        
+
         // SRE Guard: Asegurar que el directorio de trabajo existe físicamente antes de montar la jaula
-        std::fs::create_dir_all(&workspace_path)
-            .map_err(|e| PluginError::IOError(format!("Critical: Failed to create jail for tenant {}: {}", tenant_id, e)))?;
+        std::fs::create_dir_all(&workspace_path).map_err(|e| {
+            PluginError::IOError(format!(
+                "Critical: Failed to create jail for tenant {}: {}",
+                tenant_id, e
+            ))
+        })?;
 
         let mut wasi_builder = wasmtime_wasi::WasiCtxBuilder::new();
         wasi_builder
@@ -344,26 +409,43 @@ impl PluginManager {
         let url = reqwest::Url::parse(url_str)
             .map_err(|e| PluginError::SecurityViolation(format!("Invalid URL: {}", e)))?;
 
-        let host = url.host_str().ok_or_else(|| PluginError::SecurityViolation("Missing host in URL".into()))?;
-        
+        let host = url
+            .host_str()
+            .ok_or_else(|| PluginError::SecurityViolation("Missing host in URL".into()))?;
+
         let port = url.port_or_known_default().unwrap_or(80);
         let addrs = tokio::net::lookup_host(format!("{}:{}", host, port))
             .await
-            .map_err(|e| PluginError::IOError(format!("DNS Resolution failed for {}: {}", host, e)))?;
+            .map_err(|e| {
+                PluginError::IOError(format!("DNS Resolution failed for {}: {}", host, e))
+            })?;
 
         for addr in addrs {
             let ip = addr.ip();
             if ip.is_loopback() || ip.is_unspecified() {
-                return Err(PluginError::SecurityViolation(format!("SSRF Guard: Loopback/Internal access denied for {}", ip)));
+                return Err(PluginError::SecurityViolation(format!(
+                    "SSRF Guard: Loopback/Internal access denied for {}",
+                    ip
+                )));
             }
 
             if let std::net::IpAddr::V4(v4) = ip {
-                if v4.is_private() || v4.is_link_local() || v4.is_broadcast() || v4.is_documentation() {
-                    return Err(PluginError::SecurityViolation(format!("SSRF Guard: Private/Local network access denied for {}", ip)));
+                if v4.is_private()
+                    || v4.is_link_local()
+                    || v4.is_broadcast()
+                    || v4.is_documentation()
+                {
+                    return Err(PluginError::SecurityViolation(format!(
+                        "SSRF Guard: Private/Local network access denied for {}",
+                        ip
+                    )));
                 }
             } else if let std::net::IpAddr::V6(v6) = ip {
                 if (v6.segments()[0] & 0xfe00) == 0xfc00 || (v6.segments()[0] & 0xffc0) == 0xfe80 {
-                    return Err(PluginError::SecurityViolation(format!("SSRF Guard: Private IPv6 access denied for {}", ip)));
+                    return Err(PluginError::SecurityViolation(format!(
+                        "SSRF Guard: Private IPv6 access denied for {}",
+                        ip
+                    )));
                 }
             }
         }
@@ -374,17 +456,22 @@ impl PluginManager {
             .build()
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
-        let response = client.get(url)
+        let response = client
+            .get(url)
             .send()
             .await
             .map_err(|e| PluginError::IOError(format!("Network request failed: {}", e)))?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(PluginError::IOError(format!("HTTP Error returned: {}", status)));
+            return Err(PluginError::IOError(format!(
+                "HTTP Error returned: {}",
+                status
+            )));
         }
 
-        let body = response.text()
+        let body = response
+            .text()
             .await
             .map_err(|e| PluginError::IOError(format!("Failed to read response body: {}", e)))?;
 

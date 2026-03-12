@@ -1,3 +1,5 @@
+#![cfg(feature = "local_llm")]
+
 use crate::chal::{DriverStatus, ExecutionError, Grammar, InferenceDriver, SystemError};
 use async_trait::async_trait;
 use std::pin::Pin;
@@ -29,7 +31,9 @@ impl InferenceDriver for LlamaNativeDriver {
         _grammar: Option<Grammar>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<String, ExecutionError>> + Send>>, SystemError>
     {
-        Err(SystemError::ModelNotFound("Native driver disabled for tests".into()))
+        Err(SystemError::ModelNotFound(
+            "Native driver disabled for tests".into(),
+        ))
     }
 
     async fn get_health_status(&self) -> DriverStatus {

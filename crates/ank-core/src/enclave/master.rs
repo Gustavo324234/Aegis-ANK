@@ -42,7 +42,9 @@ impl MasterEnclave {
 
         info!("Master Admin Enclave initialized successfully.");
 
-        let enclave = Self { connection: Arc::new(Mutex::new(conn)) };
+        let enclave = Self {
+            connection: Arc::new(Mutex::new(conn)),
+        };
         enclave.init_schema().await?;
 
         Ok(enclave)
@@ -59,7 +61,8 @@ impl MasterEnclave {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
-        ).context("Failed to init master_admin table")?;
+        )
+        .context("Failed to init master_admin table")?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS tenants (
@@ -70,10 +73,14 @@ impl MasterEnclave {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
-        ).context("Failed to init tenants table")?;
+        )
+        .context("Failed to init tenants table")?;
 
         // SRE Migration: in case password_hash is missing from an older schema.
-        let _ = conn.execute("ALTER TABLE tenants ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute(
+            "ALTER TABLE tenants ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''",
+            [],
+        );
 
         Ok(())
     }
@@ -100,17 +107,20 @@ impl MasterEnclave {
 
         // Primero verificamos que la tabla exista consultando sqlite_master.
         // Si no existe (ej: DB acaba de ser creada pero init_schema no terminó), es false.
-        let table_exists: bool = conn.query_row(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='master_admin'",
-            [],
-            |_| Ok(true)
-        ).unwrap_or(false);
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='master_admin'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
 
         if !table_exists {
             return Ok(false);
         }
 
-        let count: i64 = conn.query_row("SELECT count(*) FROM master_admin", [], |row| row.get(0))?;
+        let count: i64 =
+            conn.query_row("SELECT count(*) FROM master_admin", [], |row| row.get(0))?;
         Ok(count > 0)
     }
 
@@ -125,7 +135,8 @@ impl MasterEnclave {
         conn.execute(
             "INSERT INTO master_admin (id, username, password_hash) VALUES (1, ?1, ?2)",
             [&username, &hash.as_str()],
-        ).context("Failed to configure Master Admin")?;
+        )
+        .context("Failed to configure Master Admin")?;
 
         info!("Master admin {} successfully configured.", username);
         Ok(())
@@ -133,17 +144,25 @@ impl MasterEnclave {
 
     /// Valida que el session_key proporcione matching real con el Master Admin password.
     /// Es vital validar tanto username como password_hash para identidad robusta.
-    pub async fn authenticate_master(&self, username: &str, passphrase_or_session: &str) -> Result<bool> {
+    pub async fn authenticate_master(
+        &self,
+        username: &str,
+        passphrase_or_session: &str,
+    ) -> Result<bool> {
         let conn = self.connection.lock().await;
-        
+
         // Buscamos el hash del admin específico por su username
-        let mut stmt = conn.prepare("SELECT password_hash FROM master_admin WHERE username = ?1 LIMIT 1")?;
-        
+        let mut stmt =
+            conn.prepare("SELECT password_hash FROM master_admin WHERE username = ?1 LIMIT 1")?;
+
         let hash_result: rusqlite::Result<String> = stmt.query_row([username], |row| row.get(0));
-        
+
         match hash_result {
             Ok(real_hash) => {
-                use argon2::{password_hash::{PasswordHash, PasswordVerifier}, Argon2};
+                use argon2::{
+                    password_hash::{PasswordHash, PasswordVerifier},
+                    Argon2,
+                };
                 let parsed_hash = match PasswordHash::new(&real_hash) {
                     Ok(ph) => ph,
                     Err(_) => return Ok(false),
@@ -152,22 +171,30 @@ impl MasterEnclave {
                     .verify_password(passphrase_or_session.as_bytes(), &parsed_hash)
                     .is_ok();
                 Ok(is_valid)
-            },
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false), // Admin no encontrado
             Err(e) => Err(anyhow::anyhow!("Database authentication error: {}", e)),
         }
     }
 
     /// Valida que el tenant proporcione un login válido no-root
-    pub async fn authenticate_tenant(&self, tenant_id: &str, passphrase_or_session: &str) -> Result<bool> {
+    pub async fn authenticate_tenant(
+        &self,
+        tenant_id: &str,
+        passphrase_or_session: &str,
+    ) -> Result<bool> {
         let conn = self.connection.lock().await;
-        let mut stmt = conn.prepare("SELECT password_hash FROM tenants WHERE tenant_id = ?1 LIMIT 1")?;
-        
+        let mut stmt =
+            conn.prepare("SELECT password_hash FROM tenants WHERE tenant_id = ?1 LIMIT 1")?;
+
         let hash_result: rusqlite::Result<String> = stmt.query_row([tenant_id], |row| row.get(0));
-        
+
         match hash_result {
             Ok(real_hash) => {
-                use argon2::{password_hash::{PasswordHash, PasswordVerifier}, Argon2};
+                use argon2::{
+                    password_hash::{PasswordHash, PasswordVerifier},
+                    Argon2,
+                };
                 let parsed_hash = match PasswordHash::new(&real_hash) {
                     Ok(ph) => ph,
                     Err(_) => return Ok(false),
@@ -176,9 +203,12 @@ impl MasterEnclave {
                     .verify_password(passphrase_or_session.as_bytes(), &parsed_hash)
                     .is_ok();
                 Ok(is_valid)
-            },
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
-            Err(e) => Err(anyhow::anyhow!("Database tenant authentication error: {}", e)),
+            Err(e) => Err(anyhow::anyhow!(
+                "Database tenant authentication error: {}",
+                e
+            )),
         }
     }
 
@@ -188,36 +218,50 @@ impl MasterEnclave {
         // En un escenario real, buscaríamos el último puerto usado.
         let mut stmt = conn.prepare("SELECT MAX(network_port) FROM tenants")?;
         let max_port: Option<u32> = stmt.query_row([], |row| row.get(0)).unwrap_or(Some(50051));
-        
+
         // Asignamos el siguiente puerto disponible, empezando desde 50052 para los tenants.
         let next_port = if let Some(p) = max_port {
-            if p >= 50052 { p + 1 } else { 50052 }
+            if p >= 50052 {
+                p + 1
+            } else {
+                50052
+            }
         } else {
             50052
         };
 
         // Generar passphrase temporal, e.g., uuid-base o hash. Usaremos uuid simplificado
         let temp_passphrase = uuid::Uuid::new_v4().to_string().replace("-", "")[0..12].to_string();
-        let hash = Self::hash_password(&temp_passphrase).context("Failed to hash temp passphrase")?;
+        let hash =
+            Self::hash_password(&temp_passphrase).context("Failed to hash temp passphrase")?;
 
         conn.execute(
             "INSERT INTO tenants (tenant_id, network_port, password_must_change, password_hash) VALUES (?1, ?2, 1, ?3)",
             rusqlite::params![tenant_id, next_port, hash],
         ).with_context(|| format!("Failed to create tenant {}", tenant_id))?;
 
-        info!("Created tenant {} assigned to port {}", tenant_id, next_port);
+        info!(
+            "Created tenant {} assigned to port {}",
+            tenant_id, next_port
+        );
 
         // Devolvemos el puerto y la contraseña temporal sin encriptar, solo para devolvérsela al cliente ahora
         Ok((next_port, temp_passphrase))
     }
 
     /// Resetea la contraseña forzosamente marcando el flag, pero sin guardar la pass del tenant en master
-    pub async fn reset_tenant_password(&self, tenant_id: &str, _new_passphrase: &str) -> Result<()> {
+    pub async fn reset_tenant_password(
+        &self,
+        tenant_id: &str,
+        _new_passphrase: &str,
+    ) -> Result<()> {
         let conn = self.connection.lock().await;
-        let rows = conn.execute(
-            "UPDATE tenants SET password_must_change = 1 WHERE tenant_id = ?1",
-            [tenant_id],
-        ).context("Failed to reset tenant password state")?;
+        let rows = conn
+            .execute(
+                "UPDATE tenants SET password_must_change = 1 WHERE tenant_id = ?1",
+                [tenant_id],
+            )
+            .context("Failed to reset tenant password state")?;
 
         if rows == 0 {
             anyhow::bail!("Tenant {} not found.", tenant_id);
@@ -240,12 +284,12 @@ mod tests {
         let path_str = db_path.to_str().unwrap();
 
         let enclave = MasterEnclave::open(path_str, "secret_key").await.unwrap();
-        
+
         assert!(!enclave.is_initialized().await.unwrap());
-        
+
         enclave.initialize_master("root", "haxor").await.unwrap();
         assert!(enclave.is_initialized().await.unwrap());
-        
+
         let is_auth = enclave.authenticate_master("root", "haxor").await.unwrap();
         assert!(is_auth);
 
@@ -253,6 +297,9 @@ mod tests {
         assert!(port >= 50052);
         assert!(!pass.is_empty());
 
-        enclave.reset_tenant_password("testuser", "ignored_for_now").await.unwrap();
+        enclave
+            .reset_tenant_password("testuser", "ignored_for_now")
+            .await
+            .unwrap();
     }
 }

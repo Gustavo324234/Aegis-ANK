@@ -77,7 +77,8 @@ impl InferenceDriver for CloudProxyDriver {
         &self,
         prompt: &str,
         grammar: Option<Grammar>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, ExecutionError>> + Send>>, SystemError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, ExecutionError>> + Send>>, SystemError>
+    {
         let mut request_body = ChatCompletionRequest {
             model: self.model_id.clone(),
             messages: vec![Message {
@@ -121,48 +122,55 @@ impl InferenceDriver for CloudProxyDriver {
         let stream = response.bytes_stream();
         let state = (stream, String::new());
 
-        let parsed_stream = futures_util::stream::unfold(state, |(mut stream, mut buffer)| async move {
-            loop {
-                // Yield any complete lines we already have in buffer
-                while let Some(idx) = buffer.find('\n') {
-                    let line = buffer[..idx].trim().to_string();
-                    buffer = buffer[idx + 1..].to_string();
-                    
-                    if line.starts_with("data: ") {
-                        let data = &line["data: ".len()..];
-                        if data == "[DONE]" {
-                            continue;
-                        }
-                        if let Ok(parsed) = serde_json::from_str::<ChatCompletionChunk>(data) {
-                            if let Some(choice) = parsed.choices.first() {
-                                if let Some(content) = &choice.delta.content {
-                                    if !content.is_empty() {
-                                        return Some((Ok(content.clone()), (stream, buffer)));
+        let parsed_stream =
+            futures_util::stream::unfold(state, |(mut stream, mut buffer)| async move {
+                loop {
+                    // Yield any complete lines we already have in buffer
+                    while let Some(idx) = buffer.find('\n') {
+                        let line = buffer[..idx].trim().to_string();
+                        buffer = buffer[idx + 1..].to_string();
+
+                        if line.starts_with("data: ") {
+                            let data = &line["data: ".len()..];
+                            if data == "[DONE]" {
+                                continue;
+                            }
+                            if let Ok(parsed) = serde_json::from_str::<ChatCompletionChunk>(data) {
+                                if let Some(choice) = parsed.choices.first() {
+                                    if let Some(content) = &choice.delta.content {
+                                        if !content.is_empty() {
+                                            return Some((Ok(content.clone()), (stream, buffer)));
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                
-                // Need more data from the network
-                match stream.next().await {
-                    Some(Ok(chunk)) => {
-                        if let Ok(text) = String::from_utf8(chunk.to_vec()) {
-                            buffer.push_str(&text);
-                        } else {
-                            return Some((Err(ExecutionError::Interrupted("Invalid UTF-8 chunk".into())), (stream, buffer)));
+
+                    // Need more data from the network
+                    match stream.next().await {
+                        Some(Ok(chunk)) => {
+                            if let Ok(text) = String::from_utf8(chunk.to_vec()) {
+                                buffer.push_str(&text);
+                            } else {
+                                return Some((
+                                    Err(ExecutionError::Interrupted("Invalid UTF-8 chunk".into())),
+                                    (stream, buffer),
+                                ));
+                            }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(ExecutionError::Interrupted(e.to_string())),
+                                (stream, buffer),
+                            ));
+                        }
+                        None => {
+                            return None; // Stream ended
                         }
                     }
-                    Some(Err(e)) => {
-                        return Some((Err(ExecutionError::Interrupted(e.to_string())), (stream, buffer)));
-                    }
-                    None => {
-                        return None; // Stream ended
-                    }
                 }
-            }
-        });
+            });
 
         Ok(Box::pin(parsed_stream))
     }

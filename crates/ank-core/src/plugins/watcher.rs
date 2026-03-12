@@ -1,5 +1,5 @@
 use crate::plugins::PluginManager;
-use notify::{Watcher, RecursiveMode};
+use notify::{RecursiveMode, Watcher};
 use notify_debouncer_mini::{new_debouncer, DebouncedEvent};
 use std::path::Path;
 use std::sync::Arc;
@@ -29,7 +29,9 @@ pub async fn watch_plugins_dir(
         },
     )?;
 
-    debouncer.watcher().watch(Path::new(&dir_path), RecursiveMode::NonRecursive)?;
+    debouncer
+        .watcher()
+        .watch(Path::new(&dir_path), RecursiveMode::NonRecursive)?;
     info!("Wasm Hot-Reloading Watcher started on {}", dir_path);
 
     tokio::spawn(async move {
@@ -51,12 +53,15 @@ pub async fn watch_plugins_dir(
                         Ok(module) => {
                             // 2. Obtain Write Lock for Atomic Hot-Swap
                             let mut pm_write = plugin_manager.write().await;
-                            
+
                             // 3. Inject and auto-discover
                             if let Err(e) = pm_write.reload_plugin_module(path_str, module).await {
                                 error!("Hot-Reload metadata fetch failed for {}: {}", path_str, e);
                             } else {
-                                info!("Plugin {} successfully hot-reloaded (Zero-Downtime)", path_str);
+                                info!(
+                                    "Plugin {} successfully hot-reloaded (Zero-Downtime)",
+                                    path_str
+                                );
                             }
                         }
                         Err(e) => {

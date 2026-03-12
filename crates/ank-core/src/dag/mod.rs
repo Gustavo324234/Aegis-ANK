@@ -1,7 +1,9 @@
-use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 use crate::pcb::PCB;
-use anyhow::{Result, bail};
+use crate::scheduler::ModelPreference;
+use anyhow::{bail, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// --- ESTADOS DEL NODO EN EL DAG ---
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -18,6 +20,7 @@ pub struct DagNode {
     pub node_id: String,
     pub description: String,
     pub dependencies: Vec<String>,
+    pub required_model: ModelPreference,
     pub expected_output: Option<String>,
     pub status: DagNodeStatus,
 }
@@ -58,15 +61,17 @@ impl GraphManager {
         for (graph_id, graph) in self.active_graphs.iter_mut() {
             // 1. Identificar todos los nodos que pueden arrancar simultáneamente
             let mut nodes_to_start = Vec::new();
-            
+
             for node in graph.nodes.values() {
                 if node.status == DagNodeStatus::Pending {
                     let can_start = node.dependencies.iter().all(|dep_id| {
-                        graph.nodes.get(dep_id)
+                        graph
+                            .nodes
+                            .get(dep_id)
                             .map(|dep| dep.status == DagNodeStatus::Completed)
                             .unwrap_or(false)
                     });
-                    
+
                     if can_start {
                         nodes_to_start.push(node.node_id.clone());
                     }
@@ -78,19 +83,20 @@ impl GraphManager {
                 // Recolectar contexto de dependencias (Inmutable)
                 let (description, deps_context) = {
                     let mut context = HashMap::new();
-                    
+
                     if let Some(node) = graph.nodes.get(&node_id) {
                         for dep_id in &node.dependencies {
                             if let Some(dep_node) = graph.nodes.get(dep_id) {
                                 if let Some(output) = &dep_node.expected_output {
                                     // REGLA: dependency_[id] para el trabajador remoto
-                                    context.insert(format!("dependency_{}", dep_id), output.clone());
+                                    context
+                                        .insert(format!("dependency_{}", dep_id), output.clone());
                                 }
                             }
                         }
                         (node.description.clone(), context)
                     } else {
-                        // Resiliencia/Zero-Panic: Si el nodo desapareció del DAG concurrentemente, 
+                        // Resiliencia/Zero-Panic: Si el nodo desapareció del DAG concurrentemente,
                         continue;
                     }
                 };
@@ -98,16 +104,13 @@ impl GraphManager {
                 // Actualizar estado a Running y crear PCB (Mutable)
                 if let Some(node) = graph.nodes.get_mut(&node_id) {
                     node.status = DagNodeStatus::Running;
-                    
-                    let mut pcb = PCB::new(
-                        node.node_id.clone(),
-                        5,
-                        description,
-                    );
-                    
+
+                    let mut pcb = PCB::new(node.node_id.clone(), 5, description);
+
+                    pcb.model_pref = node.required_model.clone();
                     pcb.parent_pid = Some(graph_id.clone());
                     pcb.inlined_context = deps_context;
-                    
+
                     ready_pcbs.push(pcb);
                 }
             }
@@ -127,6 +130,54 @@ impl GraphManager {
         }
         bail!("Node {} not found in any active graph", result.node_id)
     }
+
+    /// Implementación del Planner S-DAG
+    pub fn generate_dag_from_prompt(prompt: &str) -> Result<ExecutionGraph> {
+        let _system_prompt = "Eres el Orquestador S-DAG de Aegis OS. Divide la petición del usuario en tareas atómicas y secuenciales. Responde ÚNICAMENTE en JSON. Para tareas de código o lógica compleja, asigna required_model: CloudOnly. Para resúmenes o tareas simples, asigna LocalOnly.";
+
+        // Mocked JSON para prueba por ahora
+        let mock_json = format!(
+            r#"{{
+            "graph_id": "auto_graph_{}",
+            "original_prompt": "{}",
+            "nodes": {{
+                "node_1": {{
+                    "node_id": "node_1",
+                    "description": "Mocked Task",
+                    "dependencies": [],
+                    "required_model": "CloudOnly",
+                    "status": "Pending"
+                }}
+            }}
+        }}"#,
+            Uuid::new_v4().to_string().split_at(8).0,
+            prompt
+        );
+
+        match serde_json::from_str::<ExecutionGraph>(&mock_json) {
+            Ok(graph) => Ok(graph),
+            Err(_) => {
+                // SRE Fallback: Zero-Panic
+                let mut nodes = HashMap::new();
+                nodes.insert(
+                    "fallback_node".to_string(),
+                    DagNode {
+                        node_id: "fallback_node".to_string(),
+                        description: prompt.to_string(),
+                        dependencies: vec![],
+                        required_model: ModelPreference::HybridSmart,
+                        expected_output: None,
+                        status: DagNodeStatus::Pending,
+                    },
+                );
+                Ok(ExecutionGraph {
+                    graph_id: format!("fallback_{}", Uuid::new_v4().to_string().split_at(8).0),
+                    original_prompt: prompt.to_string(),
+                    nodes,
+                })
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -136,47 +187,66 @@ mod tests {
     #[test]
     fn test_diamond_graph_parallel_execution() {
         let mut manager = GraphManager::new();
-        
+
         // Estructura Diamante: A -> [B, C] -> D
         let mut nodes = HashMap::new();
-        
-        nodes.insert("A".into(), DagNode {
-            node_id: "A".into(),
-            description: "Task A".into(),
-            dependencies: vec![],
-            expected_output: None,
-            status: DagNodeStatus::Pending,
-        });
-        
-        nodes.insert("B".into(), DagNode {
-            node_id: "B".into(),
-            description: "Task B".into(),
-            dependencies: vec!["A".into()],
-            expected_output: None,
-            status: DagNodeStatus::Pending,
-        });
-        
-        nodes.insert("C".into(), DagNode {
-            node_id: "C".into(),
-            description: "Task C".into(),
-            dependencies: vec!["A".into()],
-            expected_output: None,
-            status: DagNodeStatus::Pending,
-        });
-        
-        nodes.insert("D".into(), DagNode {
-            node_id: "D".into(),
-            description: "Task D".into(),
-            dependencies: vec!["B".into(), "C".into()],
-            expected_output: None,
-            status: DagNodeStatus::Pending,
-        });
 
-        manager.active_graphs.insert("graph_1".into(), ExecutionGraph {
-            graph_id: "graph_1".into(),
-            original_prompt: "Diamond Test".into(),
-            nodes,
-        });
+        nodes.insert(
+            "A".into(),
+            DagNode {
+                node_id: "A".into(),
+                description: "Task A".into(),
+                dependencies: vec![],
+                required_model: ModelPreference::LocalOnly,
+                expected_output: None,
+                status: DagNodeStatus::Pending,
+            },
+        );
+
+        nodes.insert(
+            "B".into(),
+            DagNode {
+                node_id: "B".into(),
+                description: "Task B".into(),
+                dependencies: vec!["A".into()],
+                required_model: ModelPreference::LocalOnly,
+                expected_output: None,
+                status: DagNodeStatus::Pending,
+            },
+        );
+
+        nodes.insert(
+            "C".into(),
+            DagNode {
+                node_id: "C".into(),
+                description: "Task C".into(),
+                dependencies: vec!["A".into()],
+                required_model: ModelPreference::LocalOnly,
+                expected_output: None,
+                status: DagNodeStatus::Pending,
+            },
+        );
+
+        nodes.insert(
+            "D".into(),
+            DagNode {
+                node_id: "D".into(),
+                description: "Task D".into(),
+                dependencies: vec!["B".into(), "C".into()],
+                required_model: ModelPreference::LocalOnly,
+                expected_output: None,
+                status: DagNodeStatus::Pending,
+            },
+        );
+
+        manager.active_graphs.insert(
+            "graph_1".into(),
+            ExecutionGraph {
+                graph_id: "graph_1".into(),
+                original_prompt: "Diamond Test".into(),
+                nodes,
+            },
+        );
 
         // 1. Tick inicial: Solo A debe salir
         println!("[DEBUG] Tick 1...");
@@ -186,11 +256,13 @@ mod tests {
 
         // 2. Finalizar A
         println!("[DEBUG] Handle A...");
-        manager.handle_result(NodeResult {
-            node_id: "A".into(),
-            output: "Output from A".into(),
-            status: DagNodeStatus::Completed,
-        }).unwrap();
+        manager
+            .handle_result(NodeResult {
+                node_id: "A".into(),
+                output: "Output from A".into(),
+                status: DagNodeStatus::Completed,
+            })
+            .unwrap();
 
         // 3. Tick: B y C deben salir en PARALELO
         println!("[DEBUG] Tick 2 (B and C)...");
@@ -202,22 +274,26 @@ mod tests {
 
         // 4. Finalizar B (D sigue bloqueado porque falta C)
         println!("[DEBUG] Handle B...");
-        manager.handle_result(NodeResult {
-            node_id: "B".into(),
-            output: "Code B".into(),
-            status: DagNodeStatus::Completed,
-        }).unwrap();
-        
+        manager
+            .handle_result(NodeResult {
+                node_id: "B".into(),
+                output: "Code B".into(),
+                status: DagNodeStatus::Completed,
+            })
+            .unwrap();
+
         println!("[DEBUG] Tick 3 (Should be empty)...");
         assert!(manager.tick().is_empty());
 
         // 5. Finalizar C
         println!("[DEBUG] Handle C...");
-        manager.handle_result(NodeResult {
-            node_id: "C".into(),
-            output: "Code C".into(),
-            status: DagNodeStatus::Completed,
-        }).unwrap();
+        manager
+            .handle_result(NodeResult {
+                node_id: "C".into(),
+                output: "Code C".into(),
+                status: DagNodeStatus::Completed,
+            })
+            .unwrap();
 
         // 6. Tick: D debe salir con el contexto de B y C inyectado
         println!("[DEBUG] Tick 4 (D)...");
@@ -227,11 +303,11 @@ mod tests {
         println!("[DEBUG] PCB len verified.");
         let pcb_d = &pcbs[0];
         assert_eq!(pcb_d.process_name, "D");
-        
+
         // Verificar Context Forwarding (Join/Gather)
         assert_eq!(pcb_d.inlined_context.get("dependency_B").unwrap(), "Code B");
         assert_eq!(pcb_d.inlined_context.get("dependency_C").unwrap(), "Code C");
-        
+
         println!("Diamond Graph Flow: SUCCESS. Task D gathered parallel context correctly.");
     }
 }

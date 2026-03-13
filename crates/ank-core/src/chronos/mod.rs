@@ -129,6 +129,7 @@ impl ChronosDaemon {
 mod tests {
     use super::*;
     use crate::scheduler::{persistence, CognitiveScheduler};
+    use anyhow::Context;
     use tokio::sync::RwLock;
 
     #[tokio::test]

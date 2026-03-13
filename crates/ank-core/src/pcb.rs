@@ -145,6 +145,7 @@ impl PartialOrd for PCB {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[test]
     fn test_pcb_creation_and_state_change() {

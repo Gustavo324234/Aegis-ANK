@@ -244,8 +244,10 @@ impl StreamInterceptor {
             InterceptorResult::Continue
         } else {
             // Ya detectamos un trigger, buscamos el cierre ']'
-            if self.buffer.contains(']') && let Some(syscall) = parse_syscall(&self.buffer) {
-                return InterceptorResult::SyscallReady(syscall);
+            if self.buffer.contains(']') {
+                if let Some(syscall) = parse_syscall(&self.buffer) {
+                    return InterceptorResult::SyscallReady(syscall);
+                }
             }
             InterceptorResult::PossibleSyscall
         }
@@ -339,6 +341,7 @@ pub fn parse_syscall(text: &str) -> Option<Syscall> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[test]
     fn test_parse_plugin_call() -> anyhow::Result<()> {

@@ -93,6 +93,7 @@ impl VirtualContextManager {
             for swap_query in &pcb.memory_pointers.swap_refs {
                 let vector = if let Some(stripped) = swap_query.strip_prefix("vec:") {
                     stripped
+                        .split(',')
                         .filter_map(|s| s.trim().parse::<f32>().ok())
                         .collect::<Vec<f32>>()
                 } else {
@@ -288,6 +289,7 @@ pub fn is_safe_path(_tenant_id: &str, path_str: &str) -> bool {
 mod tests {
     use super::*;
     use crate::pcb::PCB;
+    use anyhow::Context;
     use std::io::Write;
 
     #[tokio::test]

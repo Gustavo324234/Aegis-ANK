@@ -521,6 +521,7 @@ impl PluginManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use std::io::Write;
     use tempfile::NamedTempFile;
 

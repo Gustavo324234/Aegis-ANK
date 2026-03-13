@@ -101,6 +101,10 @@
   - Inyección de `protobuf-compiler` en la etapa `builder` para solucionar fallos de compilación de `ank-proto`.
   - Optimización de la capa mediante limpieza de caché de `apt`.
 
+- **[ANK-904] CI/CD Protoc Injection (SRE Firewall):**
+  - Actualización de `.github/workflows/pr_check.yml` para instalar `protobuf-compiler` en el runner de GitHub Actions.
+  - Garantizada la integridad del pipeline de auditoría automática ("The Forge").
+
 ## [1.5.1] - Unreleased
 
 ### Added

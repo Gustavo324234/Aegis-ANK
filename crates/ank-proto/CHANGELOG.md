@@ -1,6 +1,10 @@
 # Changelog
 
-## [0.1.1](https://github.com/Gustavo324234/Aegis-ANK/compare/ank-proto-v0.1.0...ank-proto-v0.1.1) (2026-03-12)
+## [0.1.3](https://github.com/Gustavo324234/Aegis-ANK/compare/ank-proto-v0.1.2...ank-proto-v0.1.3) (2026-03-12)
+### Fixed
+- **proto:** explicit absolute path boxing for `Payload` variant and cache cleanup [ANK-905]
+
+## [0.1.2](https://github.com/Gustavo324234/Aegis-ANK/compare/ank-proto-v0.1.1...ank-proto-v0.1.2) (2026-03-12)
 
 
 ### Features

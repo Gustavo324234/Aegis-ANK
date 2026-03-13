@@ -5,6 +5,7 @@ Este archivo es la fuente de verdad del progreso del Aegis Neural Kernel. El pro
 El Protocolo Siren ha sido implementado exitosamente, habilitando soporte para audio mediante gRPC estricto y políticas de backpressure que garantizan tolerancia a fallos.
 
 🟩 DONE (Completado)
+- [ANK-905] Payload Enum Optimization (Clippy large_enum_variant fix) `[DONE]`
 - [ANK-903] Dockerfile Protoc Hotfix (Compilación de protos) `[DONE]`
 - [ANK-3003] MCP Cognitive Binding (Tool Discovery & Execution) (v2.1.0)
 - [ANK-2415] StdIO Transport & Subprocess Jailing (v1.4.0)

@@ -9,6 +9,7 @@ fn main() -> anyhow::Result<()> {
     // Compile with Serde support only for our core messages
     tonic_build::configure()
         .type_attribute("ank.v1", "#[derive(serde::Serialize, serde::Deserialize)]")
+        .field_attribute("ank.v1.TaskEvent.status_update", "#[prost(boxed)]")
         .compile_protos(&[proto_file, siren_file], &["../../proto"])?;
 
     Ok(())

@@ -105,6 +105,11 @@
   - Actualización de `.github/workflows/pr_check.yml` para instalar `protobuf-compiler` en el runner de GitHub Actions.
   - Garantizada la integridad del pipeline de auditoría automática ("The Forge").
 
+- **[ANK-905] Payload Enum Optimization (Clippy Fix):**
+  - Reducción de la huella de memoria del `enum Payload` generado por `prost` de 304 bytes a un tamaño óptimo mediante el uso de `boxed` fields.
+  - Modificación de `build.rs` en `ank-proto` para aplicar el atributo `#[prost(boxed)]` a la variante `status_update` (super::Pcb) del mensaje `TaskEvent`.
+  - Resolución del bloqueo de compilación causado por el lint `clippy::large_enum_variant` en entornos de auditoría estricta (SRE Firewall).
+
 ## [1.5.1] - Unreleased
 
 ### Added

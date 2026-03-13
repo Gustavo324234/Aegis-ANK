@@ -87,13 +87,19 @@ mod tests {
         GraphIntegrator::validate_and_register(&mut manager, cyclic_graph);
 
         assert_eq!(manager.active_graphs.len(), 1);
-        let registered_graph = manager.active_graphs.values().next()
+        let registered_graph = manager
+            .active_graphs
+            .values()
+            .next()
             .context("Active graphs should contain the fallback")?;
 
         // Debe ser el grafo de fallback (monolítico)
         assert!(registered_graph.graph_id.starts_with("graph_fallback_"));
         assert_eq!(registered_graph.nodes.len(), 1);
-        let node = registered_graph.nodes.values().next()
+        let node = registered_graph
+            .nodes
+            .values()
+            .next()
             .context("Fallback graph should contain one node")?;
         assert_eq!(node.description, "Create a cycle");
         Ok(())

@@ -111,8 +111,7 @@ mod tests {
         let db_path = base_path.join(format!("{}_memory.db", tenant_id));
 
         {
-            let conn = Connection::open(&db_path)
-                .context("Failed to open test database")?;
+            let conn = Connection::open(&db_path).context("Failed to open test database")?;
             conn.pragma_update(None, "key", correct_key)
                 .context("Failed to set correct key")?;
             conn.execute("CREATE TABLE test (id INTEGER)", [])
@@ -122,9 +121,10 @@ mod tests {
         }
 
         // 2. Intentar abrir con la llave incorrectA y verificar fallo de desencriptación
-        let conn_fail = Connection::open(&db_path)
-            .context("Failed to open database for wrong key test")?;
-        conn_fail.pragma_update(None, "key", wrong_key)
+        let conn_fail =
+            Connection::open(&db_path).context("Failed to open database for wrong key test")?;
+        conn_fail
+            .pragma_update(None, "key", wrong_key)
             .context("Failed to set wrong key")?;
 
         // SQLCipher fallará aquí (file is not a database)

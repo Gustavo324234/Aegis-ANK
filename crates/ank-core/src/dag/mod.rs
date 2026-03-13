@@ -257,13 +257,11 @@ mod tests {
 
         // 2. Finalizar A
         println!("[DEBUG] Handle A...");
-        manager
-            .handle_result(NodeResult {
-                node_id: "A".into(),
-                output: "Output from A".into(),
-                status: DagNodeStatus::Completed,
-            })
-            ?;
+        manager.handle_result(NodeResult {
+            node_id: "A".into(),
+            output: "Output from A".into(),
+            status: DagNodeStatus::Completed,
+        })?;
 
         // 3. Tick: B y C deben salir en PARALELO
         println!("[DEBUG] Tick 2 (B and C)...");
@@ -275,26 +273,22 @@ mod tests {
 
         // 4. Finalizar B (D sigue bloqueado porque falta C)
         println!("[DEBUG] Handle B...");
-        manager
-            .handle_result(NodeResult {
-                node_id: "B".into(),
-                output: "Code B".into(),
-                status: DagNodeStatus::Completed,
-            })
-            ?;
+        manager.handle_result(NodeResult {
+            node_id: "B".into(),
+            output: "Code B".into(),
+            status: DagNodeStatus::Completed,
+        })?;
 
         println!("[DEBUG] Tick 3 (Should be empty)...");
         assert!(manager.tick().is_empty());
 
         // 5. Finalizar C
         println!("[DEBUG] Handle C...");
-        manager
-            .handle_result(NodeResult {
-                node_id: "C".into(),
-                output: "Code C".into(),
-                status: DagNodeStatus::Completed,
-            })
-            ?;
+        manager.handle_result(NodeResult {
+            node_id: "C".into(),
+            output: "Code C".into(),
+            status: DagNodeStatus::Completed,
+        })?;
 
         // 6. Tick: D debe salir con el contexto de B y C inyectado
         println!("[DEBUG] Tick 4 (D)...");
@@ -307,12 +301,16 @@ mod tests {
 
         // Verificar Context Forwarding (Join/Gather)
         assert_eq!(
-            pcb_d.inlined_context.get("dependency_B")
+            pcb_d
+                .inlined_context
+                .get("dependency_B")
                 .context("dependency_B should be present")?,
             "Code B"
         );
         assert_eq!(
-            pcb_d.inlined_context.get("dependency_C")
+            pcb_d
+                .inlined_context
+                .get("dependency_C")
                 .context("dependency_C should be present")?,
             "Code C"
         );

@@ -184,7 +184,10 @@ mod tests {
         let fallback = GraphCompiler::create_fallback(prompt);
 
         assert_eq!(fallback.nodes.len(), 1);
-        let node = fallback.nodes.values().next()
+        let node = fallback
+            .nodes
+            .values()
+            .next()
             .context("Fallback graph should have one node")?;
         assert_eq!(node.description, prompt);
         assert!(node.dependencies.is_empty());

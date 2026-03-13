@@ -151,8 +151,8 @@ mod tests {
                 method: "test/event".to_string(),
                 params: Some(serde_json::json!({"data": "hello"})),
             };
-            let json_msg = serde_json::to_string(&msg)
-                .context("Failed to serialize SSE test message")?;
+            let json_msg =
+                serde_json::to_string(&msg).context("Failed to serialize SSE test message")?;
             let _ = tx_sse.send(Ok::<_, Infallible>(
                 warp::sse::Event::default().data(json_msg),
             ));

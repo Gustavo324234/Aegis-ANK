@@ -243,8 +243,8 @@ mod tests {
 
         // 3. Verify
         let tenant_path = scribe.compute_tenant_path(tenant_id);
-        let repo = Repository::open(&tenant_path)
-            .context("Failed to open repo for verification")?;
+        let repo =
+            Repository::open(&tenant_path).context("Failed to open repo for verification")?;
         let head = repo.head().context("Failed to get HEAD")?;
         let commit = head.peel_to_commit().context("Failed to peel to commit")?;
 

@@ -102,9 +102,7 @@ impl SirenService for AnkSirenService {
             None => return Err(Status::unimplemented("Módulo de voz local deshabilitado y faltan credenciales AEGIS_VOICE_API_URL y AEGIS_VOICE_API_KEY.")),
         };
 
-        info!(
-            "Siren stream connected (Cloud) for Tenant: [REDACTED]"
-        );
+        info!("Siren stream connected (Cloud) for Tenant: [REDACTED]");
 
         let mut in_stream = request.into_inner();
         let (tx_chunks, mut rx_chunks) = mpsc::channel::<AudioChunk>(200);
@@ -182,10 +180,7 @@ impl SirenService for AnkSirenService {
                                     return;
                                 }
 
-                                info!(
-                                    "STT Cloud Result: '{}' (Tenant: [REDACTED])",
-                                    text
-                                );
+                                info!("STT Cloud Result: '{}' (Tenant: [REDACTED])", text);
 
                                 let mut pcb =
                                     CorePCB::new("Voice Command".to_string(), 10, text.clone());
@@ -487,10 +482,7 @@ impl SirenService for AnkSirenService {
                                             return;
                                         }
 
-                                        info!(
-                                            "STT Result: '{}' (Tenant: [REDACTED])",
-                                            text
-                                        );
+                                        info!("STT Result: '{}' (Tenant: [REDACTED])", text);
 
                                         // Inyectar tarea al Scheduler
                                         let mut pcb = CorePCB::new(

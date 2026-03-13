@@ -536,11 +536,12 @@ mod tests {
             0x00, 0x00, 0x0a, 0x05, 0x01, 0x03, 0x00, 0x00, 0x0b,
         ];
 
-        let mut file = NamedTempFile::new()
-            .context("Failed to create temp file")?;
+        let mut file = NamedTempFile::new().context("Failed to create temp file")?;
         file.write_all(&wasm_bytes)
             .context("Failed to write wasm bytes")?;
-        let path = file.path().to_str()
+        let path = file
+            .path()
+            .to_str()
             .context("Temp file path is not UTF-8")?;
 
         manager.load_plugin(path).await?;

@@ -309,15 +309,15 @@ mod tests {
 
         // Crear estructura de directorios para el tenant default
         let workspace_path = "./users/default/workspace";
-        tokio::fs::create_dir_all(workspace_path).await
+        tokio::fs::create_dir_all(workspace_path)
+            .await
             .context("Failed to create workspace dir")?;
 
         // Crear un archivo temporal con ruta relativa dentro del workspace del tenant
         let file_name = "test_overflow_dummy.txt";
         let full_path = std::path::Path::new(workspace_path).join(file_name);
 
-        let mut file = std::fs::File::create(&full_path)
-            .context("Failed to create test file")?;
+        let mut file = std::fs::File::create(&full_path).context("Failed to create test file")?;
         let large_content = "X".repeat(2000); // ~500 tokens
         file.write_all(large_content.as_bytes())
             .context("Failed to write test content")?;

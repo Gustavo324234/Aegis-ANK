@@ -177,7 +177,10 @@ mod tests {
             sched_w.last_activity = Utc::now() - chrono::Duration::seconds(1);
         }
 
-        chronos.run_step().await.context("Run step should succeed")?;
+        chronos
+            .run_step()
+            .await
+            .context("Run step should succeed")?;
 
         // Verificamos que se envió el evento de ScheduleTask
         let event = rx.try_recv().context("Should have received an event")?;

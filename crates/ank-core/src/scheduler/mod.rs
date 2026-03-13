@@ -416,21 +416,27 @@ mod tests {
             .await?;
 
         // Verificamos orden de salida
-        let first = scheduler.ready_queue.pop()
+        let first = scheduler
+            .ready_queue
+            .pop()
             .context("Ready queue should not be empty (first)")?;
         assert_eq!(
             first.process_name, "task-high",
             "Prioridad 10 debe salir primero"
         );
 
-        let second = scheduler.ready_queue.pop()
+        let second = scheduler
+            .ready_queue
+            .pop()
             .context("Ready queue should not be empty (second)")?;
         assert_eq!(
             second.process_name, "task-low-1",
             "FCFS para prioridad 5 (1)"
         );
 
-        let third = scheduler.ready_queue.pop()
+        let third = scheduler
+            .ready_queue
+            .pop()
             .context("Ready queue should not be empty (third)")?;
         assert_eq!(
             third.process_name, "task-low-2",

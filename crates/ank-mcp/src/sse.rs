@@ -151,8 +151,8 @@ mod tests {
                 method: "test/event".to_string(),
                 params: Some(serde_json::json!({"data": "hello"})),
             };
-            let json_msg =
-                serde_json::to_string(&msg).unwrap_or_else(|_| r#"{"error": "mock_serialization_failed"}"#.to_string());
+            let json_msg = serde_json::to_string(&msg)
+                .unwrap_or_else(|_| r#"{"error": "mock_serialization_failed"}"#.to_string());
             let _ = tx_sse.send(Ok::<_, Infallible>(
                 warp::sse::Event::default().data(json_msg),
             ));

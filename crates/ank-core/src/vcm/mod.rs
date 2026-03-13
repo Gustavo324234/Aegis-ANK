@@ -284,7 +284,6 @@ pub fn is_safe_path(_tenant_id: &str, path_str: &str) -> bool {
 mod tests {
     use super::*;
     use crate::pcb::PCB;
-    use anyhow::Context;
     use std::io::Write;
     use tempfile::NamedTempFile;
 

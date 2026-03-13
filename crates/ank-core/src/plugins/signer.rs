@@ -1,18 +1,18 @@
 use anyhow::{Context, Result};
-use ed25519_dalek::{PublicKey, Signature, Verifier};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::fs;
 use std::path::Path;
 
 pub struct PluginSigner {
-    pub_key: PublicKey,
+    pub_key: VerifyingKey,
 }
 
 impl PluginSigner {
     /// Inicializa el verificador con la llave pública de Aegis.
     /// En producción, esto vendría de una variable de entorno o almacén de llaves.
     pub fn new(public_key_bytes: &[u8; 32]) -> Result<Self> {
-        let pub_key =
-            PublicKey::from_bytes(public_key_bytes).context("Invalid Ed25519 public key bytes")?;
+        let pub_key = VerifyingKey::from_bytes(public_key_bytes)
+            .context("Invalid Ed25519 public key bytes")?;
         Ok(Self { pub_key })
     }
 

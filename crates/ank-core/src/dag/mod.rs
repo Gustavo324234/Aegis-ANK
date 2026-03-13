@@ -183,7 +183,6 @@ impl GraphManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Context;
 
     #[test]
     fn test_diamond_graph_parallel_execution() -> anyhow::Result<()> {

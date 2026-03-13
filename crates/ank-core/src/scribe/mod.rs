@@ -215,7 +215,6 @@ impl ScribeManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Context;
     use tempfile::tempdir;
 
     #[tokio::test]

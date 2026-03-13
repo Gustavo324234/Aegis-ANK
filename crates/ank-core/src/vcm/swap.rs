@@ -120,7 +120,6 @@ impl LanceSwapManager {
 }
 
 /// --- QUANTIZATION UTILS ---
-
 /// Cuantiza un vector f32 a i8 (Symmetric Min/Max Scaling).
 /// Devuelve el vector comprimido, el valor mínimo y el máximo.
 pub fn quantize_f32_to_i8(vector: &[f32]) -> (Vec<i8>, f32, f32) {

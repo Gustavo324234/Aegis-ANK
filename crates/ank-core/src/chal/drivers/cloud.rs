@@ -1,7 +1,7 @@
 use crate::chal::{DriverStatus, ExecutionError, Grammar, InferenceDriver, SystemError};
 use async_trait::async_trait;
 use futures_util::{Stream, StreamExt};
-use reqwest::{Client, RequestBuilder};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;

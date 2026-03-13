@@ -46,6 +46,12 @@ pub struct GraphManager {
     pub active_graphs: HashMap<String, ExecutionGraph>,
 }
 
+impl Default for GraphManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GraphManager {
     pub fn new() -> Self {
         Self {

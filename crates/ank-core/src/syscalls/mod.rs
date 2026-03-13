@@ -103,11 +103,7 @@ impl SyscallExecutor {
             }
             Syscall::ReadFile { uri } => {
                 // Validación y Ensamblaje vía VCM
-                let file_path = if uri.starts_with("file://") {
-                    &uri[7..]
-                } else {
-                    &uri
-                };
+                let file_path = uri.strip_prefix("file://").unwrap_or(&uri);
 
                 if !crate::vcm::is_safe_path(tenant_id, file_path) {
                     return Err(SyscallError::SecurityViolation(format!(
@@ -136,11 +132,7 @@ impl SyscallExecutor {
                 metadata,
             } => {
                 // Mediación vía The Scribe para trazabilidad multi-tenant
-                let file_path = if uri.starts_with("file://") {
-                    &uri[7..]
-                } else {
-                    &uri
-                };
+                let file_path = uri.strip_prefix("file://").unwrap_or(&uri);
 
                 if !crate::vcm::is_safe_path(tenant_id, file_path) {
                     return Err(SyscallError::SecurityViolation(format!(
@@ -207,6 +199,12 @@ pub struct StreamInterceptor {
     max_buffer_size: usize,
 }
 
+impl Default for StreamInterceptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum InterceptorResult {
     Continue,
@@ -269,28 +267,38 @@ static READ_RE: OnceLock<Regex> = OnceLock::new();
 static WRITE_RE: OnceLock<Regex> = OnceLock::new();
 static MCP_RE: OnceLock<Regex> = OnceLock::new();
 
+/// Inicializa las expresiones regulares de forma segura al arranque del sistema.
+pub fn init_syscall_regexes() -> anyhow::Result<()> {
+    PLUGIN_RE
+        .set(Regex::new(
+            r#"\[SYS_CALL_PLUGIN\("([^"]+)",\s*(\{.*?\})\)\]"#,
+        )?)
+        .map_err(|_| anyhow::anyhow!("PLUGIN_RE already initialized"))?;
+
+    READ_RE
+        .set(Regex::new(r#"\[READ_FILE\("([^"]+)"\)\]"#)?)
+        .map_err(|_| anyhow::anyhow!("READ_RE already initialized"))?;
+
+    WRITE_RE
+        .set(Regex::new(
+            r#"\[WRITE_FILE\("([^"]+)",\s*"([\s\S]*?)",\s*(\{.*?\})\)\]"#,
+        )?)
+        .map_err(|_| anyhow::anyhow!("WRITE_RE already initialized"))?;
+
+    MCP_RE
+        .set(Regex::new(r#"\[SYS_MCP_EXEC\("([^"]+)",\s*(\{.*?\})\)\]"#)?)
+        .map_err(|_| anyhow::anyhow!("MCP_RE already initialized"))?;
+
+    Ok(())
+}
+
 /// Parser de Syscalls Cognitivas.
 /// Detecta llamadas estructuradas dentro del stream de texto de la IA.
 pub fn parse_syscall(text: &str) -> Option<Syscall> {
-    let plugin_re = PLUGIN_RE.get_or_init(|| {
-        Regex::new(r#"\[SYS_CALL_PLUGIN\("([^"]+)",\s*(\{.*?\})\)\]"#)
-            .expect("FATAL: Invalid static regex pattern")
-    });
-
-    let read_re = READ_RE.get_or_init(|| {
-        Regex::new(r#"\[READ_FILE\("([^"]+)"\)\]"#).expect("FATAL: Invalid static regex pattern")
-    });
-
-    let write_re = WRITE_RE.get_or_init(|| {
-        // Formato esperado: [WRITE_FILE("path", "content", {"task_id": "..."})]
-        Regex::new(r#"\[WRITE_FILE\("([^"]+)",\s*"([\s\S]*?)",\s*(\{.*?\})\)\]"#)
-            .expect("FATAL: Invalid static regex pattern")
-    });
-
-    let mcp_re = MCP_RE.get_or_init(|| {
-        Regex::new(r#"\[SYS_MCP_EXEC\("([^"]+)",\s*(\{.*?\})\)\]"#)
-            .expect("FATAL: Invalid static regex pattern")
-    });
+    let plugin_re = PLUGIN_RE.get()?;
+    let read_re = READ_RE.get()?;
+    let write_re = WRITE_RE.get()?;
+    let mcp_re = MCP_RE.get()?;
 
     // 1. Check for Plugin Call
     if let Some(caps) = plugin_re.captures(text) {

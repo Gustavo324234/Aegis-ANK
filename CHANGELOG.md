@@ -3,6 +3,14 @@
 ## [2.1.0] - Unreleased
 
 ### Added
+- **[ANK-910] Zero-Tolerance Clippy Purge & Manual Indexing Sanitization:**
+  - Implemented the `Strip Prefix` law: replaced all manual string indexing (e.g., `&uri[7..]`) with `strip_prefix("file://")` across `syscalls/mod.rs` and `vcm/mod.rs` to prevent index out of bounds.
+  - **Policy Zero-Panic Refactor**: Removed all `expect("FATAL")` calls in the `SyscallExecutor` regex engine.
+  - Implemented `init_syscall_regexes()` for safe, pre-validated regex compilation at system startup, returning `Result::Err` if patterns are invalid.
+  - **Architectural Conformity**: Implemented `impl Default` for `GraphManager`, `VirtualContextManager`, and `StreamInterceptor`, aligning with Clippy traits standards.
+  - **Char Optimization**: Replaced `push_str("\n")` with `push('\n')` in `vcm/mod.rs` for optimized memory allocation in the context assembly pipeline.
+  - **Global Cleanup**: Purged unused `anyhow::Result` and redundant imports in `compiler.rs` to clean up workspace lints.
+
 - **[ANK-901] SRE Firewall - CI Pull Request Guard:**
   - Implementación de `.github/workflows/pr_check.yml` para la auditoría automática de integridad en el repositorio del Kernel.
   - Configuración de "The Forge CI" con caché optimizada mediante `rust-cache` para reducir tiempos de build.

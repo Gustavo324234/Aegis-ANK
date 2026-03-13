@@ -30,9 +30,15 @@ Use the provided context to fulfill the instruction accurately.";
 const MAX_FILE_SIZE_BYTES: u64 = 2 * 1024 * 1024;
 
 /// --- VIRTUAL CONTEXT MANAGER ---
-/// El VCM es responsable de construir la \"ventana de atención\" (Context Window)
+/// El VCM es responsable de construir la "ventana de atención" (Context Window)
 /// para el LLM, agregando instrucciones L1, referencias L2 y memoria swap L3.
 pub struct VirtualContextManager;
+
+impl Default for VirtualContextManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl VirtualContextManager {
     pub fn new() -> Self {
@@ -142,7 +148,7 @@ impl VirtualContextManager {
                     continue;
                 }
 
-                let path_part = &ref_uri[7..];
+                let path_part = ref_uri.strip_prefix("file://").unwrap_or(ref_uri);
                 if !is_safe_path(tenant_id, path_part) {
                     return Err(VCMError::PathTraversalDetected(path_part.to_string()));
                 }
@@ -208,7 +214,7 @@ impl VirtualContextManager {
                     l2_str.push_str(&prefix);
                     l2_str.push_str("[...truncado por falta de memoria...]\n");
                     l2_str.push_str(content_to_add);
-                    l2_str.push_str("\n");
+                    l2_str.push('\n');
                     current_tokens += estimate_tokens(content_to_add) + prefix_tokens + 5;
                 } else {
                     if !has_l2 {
@@ -217,7 +223,7 @@ impl VirtualContextManager {
                     }
                     l2_str.push_str(&prefix);
                     l2_str.push_str(content_to_add);
-                    l2_str.push_str("\n");
+                    l2_str.push('\n');
                     current_tokens += content_tokens + prefix_tokens;
                 }
             }

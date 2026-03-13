@@ -21,6 +21,9 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Aegis Neural Kernel (ANK) System Booting...");
 
+    // Rule ANK-910: Pre-validate and initialize privileged regexes
+    ank_core::syscalls::init_syscall_regexes()?;
+
     // Canales de comunicación del bus de eventos entre gRPC y el Scheduler Cognitivo
     let (scheduler_tx, scheduler_rx) = mpsc::channel::<SchedulerEvent>(100);
     // Clon local del sender para inyección de dependencias distribuidas

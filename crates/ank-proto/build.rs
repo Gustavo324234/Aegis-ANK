@@ -15,13 +15,16 @@ fn main() -> anyhow::Result<()> {
     // Compile with explicit boxing for large variants
     let mut config = prost_build::Config::new();
     config.type_attribute("ank.v1", "#[derive(serde::Serialize, serde::Deserialize)]");
-    
+
     // Use .boxed(path) for reliable variant boxing (prost-build 0.13 method)
     config.boxed(".ank.v1.Payload.status_update");
     config.boxed(".ank.v1.TaskEvent.payload.status_update");
 
-    tonic_build::configure()
-        .compile_protos_with_config(config, &[proto_file, siren_file], &["../../proto"])?;
+    tonic_build::configure().compile_protos_with_config(
+        config,
+        &[proto_file, siren_file],
+        &["../../proto"],
+    )?;
 
     Ok(())
 }

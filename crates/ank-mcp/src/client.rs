@@ -10,7 +10,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Alias para el mapa de peticiones pendientes ruteadas por ID.
-type PendingRequests = Arc<Mutex<HashMap<String, oneshot::Sender<Result<JsonRpcMessage, McpError>>>>>;
+type PendingRequests =
+    Arc<Mutex<HashMap<String, oneshot::Sender<Result<JsonRpcMessage, McpError>>>>>;
 
 /// Sesión de cliente MCP que multiplexa peticiones JSON-RPC sobre un transporte asíncrono.
 /// Implementa el Patrón Actor para gestionar el estado de las peticiones en vuelo.

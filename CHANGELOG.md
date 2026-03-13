@@ -1,5 +1,14 @@
 # Aegis Neural Kernel (ANK) - Changelog
 
+## [0.6.0] - Unreleased
+
+### Added
+- **[ANK-911] Global Code Sanitization & Strict SRE Idioms:**
+  - **Purge of Imports**: Eliminated all unused imports across the `ank-core` crate, including legacy commented-out lines.
+  - **Strip Prefix Enforcement**: Replaced manual string indexing (e.g., `&line[N..]`) with `strip_prefix(...)` in `vcm/mod.rs` and `chal/drivers/cloud.rs` to ensure safety and prevent OOB Panics.
+  - **Dead Code Cleanup**: Removed unused fields (e.g., `tenant_id` in `TenantDB`) and applied `#[allow(dead_code)]` only where strictly required for gRPC compatibility.
+  - **Collapsible IF Refactor**: Optimized logic in `syscalls/mod.rs` by combining nested `if` statements into single predicates using `&&`.
+
 ## [2.1.0] - Unreleased
 
 ### Added

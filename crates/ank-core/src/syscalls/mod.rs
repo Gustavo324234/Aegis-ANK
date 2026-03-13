@@ -1,6 +1,5 @@
 use crate::plugins::PluginManager;
 use crate::scribe::CommitMetadata;
-use anyhow::Context;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
@@ -234,14 +233,13 @@ impl StreamInterceptor {
         // Detección de Trigger inicial
         if !self.trigger_detected {
             // Buscamos patrones conocidos de Syscall
-            if self.buffer.contains("[") {
-                if self.buffer.contains("[SYS")
+            if self.buffer.contains("[")
+                && (self.buffer.contains("[SYS")
                     || self.buffer.contains("[READ")
-                    || self.buffer.contains("[WRITE")
-                {
-                    self.trigger_detected = true;
-                    return InterceptorResult::PossibleSyscall;
-                }
+                    || self.buffer.contains("[WRITE"))
+            {
+                self.trigger_detected = true;
+                return InterceptorResult::PossibleSyscall;
             }
             InterceptorResult::Continue
         } else {

@@ -1,6 +1,5 @@
 use crate::pcb::PCB;
 use crate::vcm::swap::LanceSwapManager;
-use anyhow::Context;
 use std::path::{Component, Path};
 use thiserror::Error;
 use tracing::warn;
@@ -92,9 +91,11 @@ impl VirtualContextManager {
 
         if !pcb.memory_pointers.swap_refs.is_empty() {
             for swap_query in &pcb.memory_pointers.swap_refs {
-                let vector = if swap_query.starts_with("vec:") {
-                    swap_query[4..]
+                let vector = if let Some(stripped) = swap_query.strip_prefix("vec:") {
+                    stripped
                         .split(',')
+                        .filter_map(|s| s.trim().parse::<f32>().ok())
+                        .collect::<Vec<f32>>()
                         .filter_map(|s| s.trim().parse::<f32>().ok())
                         .collect::<Vec<f32>>()
                 } else {

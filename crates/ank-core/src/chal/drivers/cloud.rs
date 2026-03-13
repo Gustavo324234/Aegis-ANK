@@ -130,8 +130,7 @@ impl InferenceDriver for CloudProxyDriver {
                         let line = buffer[..idx].trim().to_string();
                         buffer = buffer[idx + 1..].to_string();
 
-                        if line.starts_with("data: ") {
-                            let data = &line["data: ".len()..];
+                        if let Some(data) = line.strip_prefix("data: ") {
                             if data == "[DONE]" {
                                 continue;
                             }

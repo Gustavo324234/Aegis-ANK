@@ -45,7 +45,6 @@ mod tests {
     use super::*;
     use crate::dag::{DagNode, DagNodeStatus, ExecutionGraph};
     use crate::scheduler::ModelPreference;
-    use anyhow::Context;
     use std::collections::HashMap;
 
     #[test]

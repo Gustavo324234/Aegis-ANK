@@ -1,4 +1,3 @@
-use anyhow::Context;
 use git2::{Repository, Signature};
 use serde::{Deserialize, Serialize};
 use std::path::Path;

@@ -9,7 +9,6 @@ pub mod master;
 /// Gestiona una base de datos SQLite encriptada con SQLCipher por cada tenant.
 pub struct TenantDB {
     connection: Connection,
-    tenant_id: String,
 }
 
 impl TenantDB {
@@ -39,10 +38,7 @@ impl TenantDB {
 
         info!(tenant_id = %tenant_id, "Secure Enclave initialized successfully.");
 
-        let db = Self {
-            connection: conn,
-            tenant_id: tenant_id.to_string(),
-        };
+        let db = Self { connection: conn };
 
         // 3. Inicializar esquema básico
         db.init_schema()?;

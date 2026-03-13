@@ -1,6 +1,8 @@
 # Stage 1: Build the Rust binary
 FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS builder
 
+RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \

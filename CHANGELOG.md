@@ -96,6 +96,11 @@
   - Transformado el Kernel en un modelo "Microkernel" activando bindings pesados de C++ (`llama-cpp-2`, `whisper-rs`, `webrtc-vad`) exclusivamente a través de los *features* `local_llm`, `local_voice` y `full_local`.
   - Aplicados mecanismos *Graceful Degradation* (Zero-Panic) para retornar estatus `unimplemented` en servicios gRPC nativos si los módulos locales no están incluidos en el *build*.
 
+### Fixed
+- **[ANK-903] Dockerfile Protoc Hotfix:**
+  - Inyección de `protobuf-compiler` en la etapa `builder` para solucionar fallos de compilación de `ank-proto`.
+  - Optimización de la capa mediante limpieza de caché de `apt`.
+
 ## [1.5.1] - Unreleased
 
 ### Added

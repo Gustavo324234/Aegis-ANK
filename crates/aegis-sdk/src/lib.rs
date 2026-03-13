@@ -44,7 +44,7 @@ where
             error: Some(format!("Error reading stdin: {:?}", e)),
         };
         write_output(&err_res);
-        return Ok(()); 
+        return Ok(());
     }
 
     let response = process_internal(metadata, &buffer, handler);

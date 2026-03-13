@@ -164,8 +164,10 @@ impl SyscallExecutor {
                 tool_name,
                 args_json,
             } => {
-                let args_val: serde_json::Value = serde_json::from_str(&args_json)
-                    .map_err(|e| SyscallError::InternalError(format!("Invalid MCP args JSON: {}", e)))?;
+                let args_val: serde_json::Value =
+                    serde_json::from_str(&args_json).map_err(|e| {
+                        SyscallError::InternalError(format!("Invalid MCP args JSON: {}", e))
+                    })?;
 
                 let result = ank_mcp::registry::McpToolDispatcher::execute(
                     &self.mcp_registry,

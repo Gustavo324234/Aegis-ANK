@@ -1,19 +1,20 @@
+use crate::error::McpError;
+use crate::transport::{JsonRpcMessage, McpTransport};
+use futures_util::StreamExt;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, oneshot};
-use crate::transport::{McpTransport, JsonRpcMessage};
-use crate::error::McpError;
-use uuid::Uuid;
-use serde_json::Value;
+use tokio::sync::{oneshot, Mutex};
 use tokio::time::{timeout, Duration};
-use futures_util::StreamExt;
-use tracing::{warn, info, error, debug};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 /// Sesión de cliente MCP que multiplexa peticiones JSON-RPC sobre un transporte asíncrono.
 /// Implementa el Patrón Actor para gestionar el estado de las peticiones en vuelo.
 pub struct McpClientSession {
     transport: Arc<dyn McpTransport>,
-    pending_requests: Arc<Mutex<HashMap<String, oneshot::Sender<Result<JsonRpcMessage, McpError>>>>>,
+    pending_requests:
+        Arc<Mutex<HashMap<String, oneshot::Sender<Result<JsonRpcMessage, McpError>>>>>,
 }
 
 impl std::fmt::Debug for McpClientSession {
@@ -46,10 +47,15 @@ impl McpClientSession {
     async fn background_loop(&self) {
         debug!("ANK-MCP: Iniciando multiplexor asíncrono");
         let mut stream = self.transport.receive_messages();
-        
+
         while let Some(msg_result) = stream.next().await {
             match msg_result {
-                Ok(JsonRpcMessage::Response { id, result, error, jsonrpc }) => {
+                Ok(JsonRpcMessage::Response {
+                    id,
+                    result,
+                    error,
+                    jsonrpc,
+                }) => {
                     let id_str = match &id {
                         Value::String(s) => s.clone(),
                         Value::Number(n) => n.to_string(),
@@ -70,7 +76,10 @@ impl McpClientSession {
                         let _ = tx.send(Ok(response));
                         debug!("ANK-MCP: Respuesta ruteada con éxito para ID: {}", id_str);
                     } else {
-                        warn!("ANK-MCP: Recibida respuesta para ID desconocido o timeout: {}", id_str);
+                        warn!(
+                            "ANK-MCP: Recibida respuesta para ID desconocido o timeout: {}",
+                            id_str
+                        );
                     }
                 }
                 Ok(JsonRpcMessage::Notification { method, params, .. }) => {
@@ -88,9 +97,11 @@ impl McpClientSession {
         }
 
         // Escalación SRE: Si el transporte muere, abortar todas las promesas pendientes.
-        warn!("ANK-MCP: Transporte cerrado. Limpiando {} peticiones pendientes.", 
-            self.pending_requests.lock().await.len());
-            
+        warn!(
+            "ANK-MCP: Transporte cerrado. Limpiando {} peticiones pendientes.",
+            self.pending_requests.lock().await.len()
+        );
+
         let mut pending = self.pending_requests.lock().await;
         for (id, tx) in pending.drain() {
             debug!("ANK-MCP: Notificando ConnectionClosed a ID: {}", id);
@@ -129,10 +140,20 @@ impl McpClientSession {
 
         // 3. Await con Resiliencia (Timeout de 30 segundos según especificación)
         match timeout(Duration::from_secs(30), rx).await {
-            Ok(Ok(Ok(JsonRpcMessage::Response { result, error: rpc_err, .. }))) => {
+            Ok(Ok(Ok(JsonRpcMessage::Response {
+                result,
+                error: rpc_err,
+                ..
+            }))) => {
                 if let Some(e) = rpc_err {
-                    warn!("ANK-MCP: Servidor devolvió error RPC para {}: {}", id, e.message);
-                    Err(McpError::Internal(format!("Error {}: {}", e.code, e.message)))
+                    warn!(
+                        "ANK-MCP: Servidor devolvió error RPC para {}: {}",
+                        id, e.message
+                    );
+                    Err(McpError::Internal(format!(
+                        "Error {}: {}",
+                        e.code, e.message
+                    )))
                 } else {
                     Ok(result.unwrap_or(Value::Null))
                 }
@@ -143,19 +164,27 @@ impl McpClientSession {
             }
             Ok(Err(_)) => {
                 // RecvError: El sender fue droppeado sin enviar nada
-                error!("ANK-MCP: El canal de respuesta se cerró prematuramente para ID: {}", id);
+                error!(
+                    "ANK-MCP: El canal de respuesta se cerró prematuramente para ID: {}",
+                    id
+                );
                 Err(McpError::ConnectionClosed)
             }
             Err(_) => {
                 // Timeout
-                warn!("ANK-MCP: Timeout excedido (30s) esperando respuesta para ID: {}", id);
+                warn!(
+                    "ANK-MCP: Timeout excedido (30s) esperando respuesta para ID: {}",
+                    id
+                );
                 let mut pending = self.pending_requests.lock().await;
                 pending.remove(&id);
                 Err(McpError::Timeout)
             }
             Ok(Ok(_)) => {
                 error!("ANK-MCP: Flujo de control inválido. Se recibió un mensaje no-Response para ID: {}", id);
-                Err(McpError::Internal("Protocol violation: Non-response message in channel".into()))
+                Err(McpError::Internal(
+                    "Protocol violation: Non-response message in channel".into(),
+                ))
             }
         }
     }
@@ -166,8 +195,8 @@ mod tests {
     use super::*;
     use crate::transport::McpTransport;
     use async_trait::async_trait;
-    use std::pin::Pin;
     use futures_util::Stream;
+    use std::pin::Pin;
     use tokio::time::sleep;
 
     struct MockTransport {
@@ -180,16 +209,18 @@ mod tests {
             Ok(())
         }
 
-        fn receive_messages(&self) -> Pin<Box<dyn Stream<Item = anyhow::Result<JsonRpcMessage>> + Send>> {
+        fn receive_messages(
+            &self,
+        ) -> Pin<Box<dyn Stream<Item = anyhow::Result<JsonRpcMessage>> + Send>> {
             let delay = self.delay;
             let stream = async_stream::try_stream! {
                 sleep(delay).await;
                 // Yielding nothing is fine, but we need to satisfy the type inference
                 if false {
-                    yield JsonRpcMessage::Notification { 
-                        jsonrpc: "2.0".to_string(), 
-                        method: "stub".into(), 
-                        params: None 
+                    yield JsonRpcMessage::Notification {
+                        jsonrpc: "2.0".to_string(),
+                        method: "stub".into(),
+                        params: None
                     };
                 }
             };
@@ -199,11 +230,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_session_timeout() {
-        let transport = MockTransport { delay: Duration::from_secs(40) }; // Mayor que el timeout de 30s
+        let transport = MockTransport {
+            delay: Duration::from_secs(40),
+        }; // Mayor que el timeout de 30s
         let session = McpClientSession::new(transport);
 
         let result = session.call("test/method", Value::Null).await;
-        
+
         match result {
             Err(McpError::Timeout) => info!("Test pasado: Timeout detectado correctamente"),
             other => panic!("Se esperaba McpError::Timeout, se obtuvo: {:?}", other),

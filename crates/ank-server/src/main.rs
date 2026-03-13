@@ -1,8 +1,11 @@
-use anyhow::Context;
-use ank_core::{enclave::master::MasterEnclave, CognitiveScheduler, SchedulerEvent, SQLCipherPersistor, StatePersistor};
-use ank_core::plugins::PluginManager;
 use ank_core::plugins::watcher::watch_plugins_dir;
+use ank_core::plugins::PluginManager;
+use ank_core::{
+    enclave::master::MasterEnclave, CognitiveScheduler, SQLCipherPersistor, SchedulerEvent,
+    StatePersistor,
+};
 use ank_proto::v1::kernel_service_server::KernelServiceServer;
+use anyhow::Context;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
@@ -30,9 +33,9 @@ async fn main() -> anyhow::Result<()> {
     // Usamos AEGIS_ROOT_KEY (mismo que Enclave) para cifrar la persistencia del Scheduler
     let root_key = std::env::var("AEGIS_ROOT_KEY")
         .context("FATAL: AEGIS_ROOT_KEY environment variable is missing.")?;
-    
+
     let persistence = Arc::new(SQLCipherPersistor::new("scheduler_state.db", &root_key)?);
-    
+
     // Inicializar el Cognitive Scheduler principal con persistencia inyectada
     let scheduler = CognitiveScheduler::new(Arc::clone(&persistence) as Arc<dyn StatePersistor>);
 
@@ -52,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     // Hot-reload Wasm Plugins Initialization
     let plugin_manager = Arc::new(RwLock::new(PluginManager::new()?));
     let pm_clone = Arc::clone(&plugin_manager);
-    
+
     // Spawn zero-downtime hot-reload daemon
     tokio::spawn(async move {
         if let Err(e) = watch_plugins_dir("./plugins".to_string(), pm_clone).await {
@@ -73,27 +76,35 @@ async fn main() -> anyhow::Result<()> {
 
     // Configuración e instanciación del servidor gRPC (0.0.0.0:50051 per req)
     let addr = "0.0.0.0:50051".parse()?;
-    
+
     let pm_clone2 = Arc::clone(&plugin_manager);
     let hal = Arc::new(RwLock::new(ank_core::chal::CognitiveHAL::new(pm_clone2)));
 
     // Instanciar el servicio con la UI / Cliente Python apuntando acá
-    let ank_service = AnkRpcServer::new(scheduler_tx.clone(), Arc::clone(&event_broker), master_enclave, hal);
+    let ank_service = AnkRpcServer::new(
+        scheduler_tx.clone(),
+        Arc::clone(&event_broker),
+        master_enclave,
+        hal,
+    );
 
     // Aplicar Middleware de Autenticación (Citadel Protocol)
-    let svc = KernelServiceServer::with_interceptor(
-        ank_service,
-        ank_server::server::auth_interceptor,
-    );
+    let svc =
+        KernelServiceServer::with_interceptor(ank_service, ank_server::server::auth_interceptor);
 
     // Servicio Siren
-    let siren_impl = ank_server::siren::AnkSirenService::new(scheduler_tx.clone(), Arc::clone(&event_broker))?;
-    let siren_svc = ank_proto::v1::siren::siren_service_server::SirenServiceServer::with_interceptor(
-        siren_impl,
-        ank_server::server::auth_interceptor,
-    );
+    let siren_impl =
+        ank_server::siren::AnkSirenService::new(scheduler_tx.clone(), Arc::clone(&event_broker))?;
+    let siren_svc =
+        ank_proto::v1::siren::siren_service_server::SirenServiceServer::with_interceptor(
+            siren_impl,
+            ank_server::server::auth_interceptor,
+        );
 
-    info!("ANK KernelService y SirenService levantados exitosamente en {}", addr);
+    info!(
+        "ANK KernelService y SirenService levantados exitosamente en {}",
+        addr
+    );
 
     // Levantar Tonic Server
     Server::builder()

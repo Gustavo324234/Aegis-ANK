@@ -173,7 +173,8 @@ impl VirtualContextManager {
                 let prefix = format!("[File: {}]\n", path_part);
                 let prefix_tokens = estimate_tokens(&prefix);
 
-                let remaining = actual_token_limit.saturating_sub(current_tokens + prefix_tokens + 5);
+                let remaining =
+                    actual_token_limit.saturating_sub(current_tokens + prefix_tokens + 5);
                 if remaining == 0 {
                     if !has_l2 {
                         l2_str.push_str("\n## ATTACHED CONTEXT\n");
@@ -356,7 +357,8 @@ mod tests {
         let vcm = VirtualContextManager::new();
         let swap = LanceSwapManager::new("./test_users");
         let mut pcb = PCB::new("DAGProc".into(), 5, "Task".into());
-        pcb.inlined_context.insert("parent_node".into(), "parent_output".into());
+        pcb.inlined_context
+            .insert("parent_node".into(), "parent_output".into());
 
         let context = vcm.assemble_context(&pcb, &swap, 1000).await.unwrap();
         assert!(context.contains("## DAG CONTEXT (DEPENDENCIES)"));

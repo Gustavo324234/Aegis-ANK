@@ -1,4 +1,3 @@
-
 use ank_proto::v1::siren::SirenEvent;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -20,7 +19,8 @@ impl SentenceAccumulator {
     pub async fn push_token(&mut self, token: &str) {
         self.buffer.push_str(token);
 
-        if token.contains('.') || token.contains('?') || token.contains('!') || token.contains('\n') {
+        if token.contains('.') || token.contains('?') || token.contains('!') || token.contains('\n')
+        {
             let sentence = self.buffer.trim().to_string();
             if !sentence.is_empty() {
                 if let Err(e) = self.tts_tx.send(sentence.clone()).await {

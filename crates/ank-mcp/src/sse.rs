@@ -47,9 +47,14 @@ impl SseTransport {
 #[async_trait]
 impl McpTransport for SseTransport {
     async fn send_message(&self, msg: JsonRpcMessage) -> Result<()> {
-        debug!("Enviando mensaje MCP via POST a {}: {:?}", self.post_url, msg);
-        
-        let response = self.client.post(self.post_url.clone())
+        debug!(
+            "Enviando mensaje MCP via POST a {}: {:?}",
+            self.post_url, msg
+        );
+
+        let response = self
+            .client
+            .post(self.post_url.clone())
             .json(&msg)
             .send()
             .await
@@ -58,7 +63,10 @@ impl McpTransport for SseTransport {
         if !response.status().is_success() {
             let status = response.status();
             error!("Error al enviar mensaje MCP: HTTP {}", status);
-            return Err(anyhow!(SseError::Protocol(format!("HTTP Error: {}", status))));
+            return Err(anyhow!(SseError::Protocol(format!(
+                "HTTP Error: {}",
+                status
+            ))));
         }
 
         Ok(())
@@ -115,48 +123,51 @@ impl McpTransport for SseTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use warp::Filter;
     use std::convert::Infallible;
     use tokio::time::sleep;
+    use warp::Filter;
 
     #[tokio::test]
     async fn test_sse_transport_e2e() -> Result<()> {
         // 1. Mock Server setup
         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
-        
+
         // POST handler (recibe requests JSON-RPC)
         let post_route = warp::post()
             .and(warp::path("rpc"))
             .and(warp::body::json())
             .map(move |msg: JsonRpcMessage| {
                 let _ = tx.try_send(msg);
-                warp::reply::with_status(warp::reply::json(&serde_json::json!({"status": "ok"})), warp::http::StatusCode::OK)
+                warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({"status": "ok"})),
+                    warp::http::StatusCode::OK,
+                )
             });
 
         // SSE handler (envía eventos)
-        let sse_route = warp::get()
-            .and(warp::path("sse"))
-            .map(|| {
-                let (tx_sse, rx_sse) = tokio::sync::mpsc::unbounded_channel();
-                
-                let msg = JsonRpcMessage::Notification {
-                    jsonrpc: "2.0".to_string(),
-                    method: "test/event".to_string(),
-                    params: Some(serde_json::json!({"data": "hello"})),
-                };
-                let json_msg = serde_json::to_string(&msg).unwrap();
-                let _ = tx_sse.send(Ok::<_, Infallible>(warp::sse::Event::default().data(json_msg)));
+        let sse_route = warp::get().and(warp::path("sse")).map(|| {
+            let (tx_sse, rx_sse) = tokio::sync::mpsc::unbounded_channel();
 
-                // Mantenemos el stream vivo enviando un ping o simplemente no cerrando el canal
-                let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx_sse);
-                warp::sse::reply(warp::sse::keep_alive().stream(stream))
-            });
+            let msg = JsonRpcMessage::Notification {
+                jsonrpc: "2.0".to_string(),
+                method: "test/event".to_string(),
+                params: Some(serde_json::json!({"data": "hello"})),
+            };
+            let json_msg = serde_json::to_string(&msg).unwrap();
+            let _ = tx_sse.send(Ok::<_, Infallible>(
+                warp::sse::Event::default().data(json_msg),
+            ));
+
+            // Mantenemos el stream vivo enviando un ping o simplemente no cerrando el canal
+            let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx_sse);
+            warp::sse::reply(warp::sse::keep_alive().stream(stream))
+        });
 
         let routes = post_route.or(sse_route);
         let addr = ([127, 0, 0, 1], 0); // Port 0 assigns random available port
         let (addr, server) = warp::serve(routes).bind_ephemeral(addr);
         let port = addr.port();
-        
+
         let server_hnd = tokio::spawn(server);
         sleep(Duration::from_millis(100)).await; // Wait for server to boot
 

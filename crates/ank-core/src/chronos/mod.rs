@@ -133,7 +133,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_idle_detection_logic() {
-        let scheduler = Arc::new(RwLock::new(CognitiveScheduler::new(Arc::new(persistence::MockPersistor))));
+        let scheduler = Arc::new(RwLock::new(CognitiveScheduler::new(Arc::new(
+            persistence::MockPersistor,
+        ))));
         let swap = Arc::new(LanceSwapManager::new("./tmp/test_swap"));
         let (tx, _rx) = mpsc::channel(32);
 
@@ -161,7 +163,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_chronos_scheduling_injection() {
-        let scheduler = Arc::new(RwLock::new(CognitiveScheduler::new(Arc::new(persistence::MockPersistor))));
+        let scheduler = Arc::new(RwLock::new(CognitiveScheduler::new(Arc::new(
+            persistence::MockPersistor,
+        ))));
         let swap = Arc::new(LanceSwapManager::new("./tmp/test_swap_inj"));
         let (tx, mut rx) = mpsc::channel(32);
 

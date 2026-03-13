@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 use wasmtime::{Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::pipe::{MemoryInputPipe, MemoryOutputPipe};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
 
-pub mod watcher;
 pub mod signer;
+pub mod watcher;
 
-use crate::enclave::TenantDB;
 use self::signer::PluginSigner;
+use crate::enclave::TenantDB;
 
 /// --- PLUGIN ERROR SYSTEM (ANK-2411 Hardening) ---
 #[derive(Error, Debug)]
@@ -96,7 +96,7 @@ impl PluginManager {
 
         // Root key para validación de plugins (Ring 0)
         // En un entorno real, AEGIS_ROOT_KEY vendría de enclave/vault.
-        let public_key = [0u8; 32]; 
+        let public_key = [0u8; 32];
         let signer = PluginSigner::new(&public_key)
             .map_err(|e| PluginError::IOError(format!("Failed to init Signer: {}", e)))?;
 
@@ -119,7 +119,8 @@ impl PluginManager {
     ) -> Result<(), PluginError> {
         // En reload_plugin_module asumimos que el watcher ya verificó la firma o lo haremos aquí.
         // Por seguridad, siempre verificamos firma antes de cargar al mapa.
-        self.signer.verify_plugin(path)
+        self.signer
+            .verify_plugin(path)
             .map_err(|e| PluginError::SecurityViolation(e.to_string()))?;
 
         let name = Path::new(path)
@@ -190,11 +191,13 @@ impl PluginManager {
     /// [ANK-2411] MANDATORY Signature Verification.
     pub async fn load_plugin(&mut self, path: &str) -> Result<(), PluginError> {
         // 0. Firma Obligatoria (Ring 0 Policy)
-        self.signer.verify_plugin(path)
-            .map_err(|e| {
-                error!("SECURITY ALERT: Plugin signature mismatch for {}: {}", path, e);
-                PluginError::SecurityViolation(e.to_string())
-            })?;
+        self.signer.verify_plugin(path).map_err(|e| {
+            error!(
+                "SECURITY ALERT: Plugin signature mismatch for {}: {}",
+                path, e
+            );
+            PluginError::SecurityViolation(e.to_string())
+        })?;
 
         let name = Path::new(path)
             .file_stem()
@@ -286,7 +289,10 @@ impl PluginManager {
                     if let Err(e) = self.load_plugin(path_str).await {
                         error!("Failed to load plugin {}: {}", path_str, e);
                     } else {
-                        info!("Plugin loaded and verified: {:?}", path.file_name().unwrap_or_default());
+                        info!(
+                            "Plugin loaded and verified: {:?}",
+                            path.file_name().unwrap_or_default()
+                        );
                     }
                 }
             }
@@ -310,9 +316,8 @@ impl PluginManager {
         let mut final_input = input_json.to_string();
         if plugin_name == "std_net" {
             // ... (keep fetch_url_safe logic) ...
-            let req: serde_json::Value = serde_json::from_str(input_json).map_err(|e| {
-                PluginError::LogicError(format!("Invalid JSON for std_net: {}", e))
-            })?;
+            let req: serde_json::Value = serde_json::from_str(input_json)
+                .map_err(|e| PluginError::LogicError(format!("Invalid JSON for std_net: {}", e)))?;
 
             if let Some(action) = req.get("action").and_then(|a| a.as_str()) {
                 if action != "get_metadata" {
@@ -325,9 +330,7 @@ impl PluginManager {
                                 .and_then(|u| u.as_str())
                         })
                         .ok_or_else(|| {
-                            PluginError::LogicError(
-                                "std_net requires 'url' parameter".to_string(),
-                            )
+                            PluginError::LogicError("std_net requires 'url' parameter".to_string())
                         })?;
 
                     let raw_html = self.fetch_url_safe(url).await?;
@@ -343,13 +346,12 @@ impl PluginManager {
         }
 
         let stdin = MemoryInputPipe::new(final_input.as_bytes().to_vec());
-        let stdout = MemoryOutputPipe::new(4096 * 10); 
+        let stdout = MemoryOutputPipe::new(4096 * 10);
 
         // 2. Construir el contexto WASI (Dynamic Jailing)
         let workspace_path = format!("./users/{}/workspace", tenant_id);
-        std::fs::create_dir_all(&workspace_path).map_err(|e| {
-            PluginError::IOError(format!("Failed to create jail: {}", e))
-        })?;
+        std::fs::create_dir_all(&workspace_path)
+            .map_err(|e| PluginError::IOError(format!("Failed to create jail: {}", e)))?;
 
         let mut wasi_builder = wasmtime_wasi::WasiCtxBuilder::new();
         wasi_builder
@@ -361,9 +363,7 @@ impl PluginManager {
                 wasmtime_wasi::DirPerms::all(),
                 wasmtime_wasi::FilePerms::all(),
             )
-            .map_err(|e| {
-                PluginError::SecurityViolation(format!("Jailing Failed: {}", e))
-            })?;
+            .map_err(|e| PluginError::SecurityViolation(format!("Jailing Failed: {}", e)))?;
         let wasi_ctx = wasi_builder.build_p1();
 
         let state = PluginState {
@@ -372,7 +372,9 @@ impl PluginManager {
         };
 
         let mut store = Store::new(&self.engine, state);
-        store.set_fuel(1_000_000).map_err(|e| PluginError::LogicError(e.to_string()))?;
+        store
+            .set_fuel(1_000_000)
+            .map_err(|e| PluginError::LogicError(e.to_string()))?;
 
         // 3. Instanciar
         let instance = self
@@ -395,9 +397,11 @@ impl PluginManager {
                         // TAINTED POLICY: Mark in TenantDB
                         // En un entorno real, AEGIS_SESSION_KEY vendría del contexto.
                         if let Ok(db) = TenantDB::open(tenant_id, "default_internal_key") {
-                           let _ = db.set_kv(&format!("plugin_status:{}", plugin_name), "TAINTED");
+                            let _ = db.set_kv(&format!("plugin_status:{}", plugin_name), "TAINTED");
                         }
-                        return Err(PluginError::SecurityViolation("Memory Out Of Bounds (Potential Buffer Overflow Attack)".to_string()));
+                        return Err(PluginError::SecurityViolation(
+                            "Memory Out Of Bounds (Potential Buffer Overflow Attack)".to_string(),
+                        ));
                     }
                     wasmtime::Trap::StackOverflow | wasmtime::Trap::UnreachableCode => {
                         return Err(PluginError::LogicError(format!("Runtime Trap: {}", trap)));
@@ -413,7 +417,6 @@ impl PluginManager {
         String::from_utf8(output_bytes.to_vec())
             .map_err(|e| PluginError::ExecutionFailed(format!("Invalid UTF-8 output: {}", e)))
     }
-
 
     /// Implementación de seguridad SRE para peticiones HTTP.
     /// Bloquea ataques SSRF validando que la URL no apunte a rangos locales o privados.

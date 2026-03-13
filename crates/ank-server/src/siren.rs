@@ -1,4 +1,4 @@
-use ank_core::{PCB as CorePCB, SchedulerEvent};
+use ank_core::{SchedulerEvent, PCB as CorePCB};
 use ank_proto::v1::siren::siren_service_server::SirenService;
 use ank_proto::v1::siren::{AudioChunk, SirenEvent};
 use std::sync::Arc;
@@ -40,8 +40,9 @@ impl AnkSirenService {
     ) -> anyhow::Result<Self> {
         // Load Whisper Model - GGUF Base as per ANK-124
         // Logic SRE: Si el modelo no está, fallamos al arranque para evitar fallos silenciosos en producción
-        let model_path = std::env::var("AEGIS_WHISPER_MODEL").unwrap_or_else(|_| "ggml-base.bin".to_string());
-        
+        let model_path =
+            std::env::var("AEGIS_WHISPER_MODEL").unwrap_or_else(|_| "ggml-base.bin".to_string());
+
         info!("Loading Whisper model from: {}", model_path);
         let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
             .map_err(|e| anyhow::anyhow!("Failed to load Whisper model {}: {:?}", model_path, e))?;
@@ -60,7 +61,7 @@ impl AnkSirenService {
     ) -> anyhow::Result<Self> {
         let api_url = std::env::var("AEGIS_VOICE_API_URL").ok();
         let api_key = std::env::var("AEGIS_VOICE_API_KEY").ok();
-        
+
         let cloud_voice = if let (Some(url), Some(key)) = (api_url, api_key) {
             match ank_core::chal::drivers::cloud_voice::CloudVoiceDriver::new(url, key) {
                 Ok(driver) => Some(Arc::new(driver)),
@@ -101,7 +102,10 @@ impl SirenService for AnkSirenService {
             None => return Err(Status::unimplemented("Módulo de voz local deshabilitado y faltan credenciales AEGIS_VOICE_API_URL y AEGIS_VOICE_API_KEY.")),
         };
 
-        info!("Siren stream connected (Cloud) for Tenant: {}", auth.tenant_id);
+        info!(
+            "Siren stream connected (Cloud) for Tenant: {}",
+            auth.tenant_id
+        );
 
         let mut in_stream = request.into_inner();
         let (tx_chunks, mut rx_chunks) = mpsc::channel::<AudioChunk>(200);
@@ -113,7 +117,9 @@ impl SirenService for AnkSirenService {
                 match in_stream.message().await {
                     Ok(Some(chunk)) => {
                         if tx_chunks.try_send(chunk).is_err() {
-                            let _ = tx_events_consumer.send(Err(Status::resource_exhausted("Audio buffer full"))).await;
+                            let _ = tx_events_consumer
+                                .send(Err(Status::resource_exhausted("Audio buffer full")))
+                                .await;
                             break;
                         }
                     }
@@ -129,23 +135,27 @@ impl SirenService for AnkSirenService {
         let tx_events_worker = tx_events.clone();
         let scheduler_tx = self.scheduler_tx.clone();
         let event_broker = self.event_broker.clone();
-        
+
         tokio::spawn(async move {
             let mut speech_buffer: Vec<u8> = Vec::with_capacity(16000 * 5 * 2);
 
             while let Some(chunk) = rx_chunks.recv().await {
-                if chunk.format == "VAD_END_SIGNAL" || (chunk.format == "pcm_16khz_16bit" && chunk.data.is_empty()) {
+                if chunk.format == "VAD_END_SIGNAL"
+                    || (chunk.format == "pcm_16khz_16bit" && chunk.data.is_empty())
+                {
                     if speech_buffer.is_empty() {
                         continue;
                     }
-                    
-                    let _ = tx_events_worker.send(Ok(SirenEvent {
-                        event_type: "VAD_END".to_string(),
-                        message: "Processing voice via Cloud...".to_string(),
-                        processed_sequence_number: chunk.sequence_number,
-                        tts_audio_chunk: vec![],
-                        sample_rate: 0,
-                    })).await;
+
+                    let _ = tx_events_worker
+                        .send(Ok(SirenEvent {
+                            event_type: "VAD_END".to_string(),
+                            message: "Processing voice via Cloud...".to_string(),
+                            processed_sequence_number: chunk.sequence_number,
+                            tts_audio_chunk: vec![],
+                            sample_rate: 0,
+                        }))
+                        .await;
 
                     let captured_audio = std::mem::take(&mut speech_buffer);
                     let driver_clone = cloud_driver.clone();
@@ -173,19 +183,26 @@ impl SirenService for AnkSirenService {
                                     return;
                                 }
 
-                                info!("STT Cloud Result: '{}' (Tenant: {})", text, auth_clone.tenant_id);
+                                info!(
+                                    "STT Cloud Result: '{}' (Tenant: {})",
+                                    text, auth_clone.tenant_id
+                                );
 
-                                let mut pcb = CorePCB::new("Voice Command".to_string(), 10, text.clone());
+                                let mut pcb =
+                                    CorePCB::new("Voice Command".to_string(), 10, text.clone());
                                 pcb.tenant_id = Some(auth_clone.tenant_id);
                                 pcb.session_key = Some(auth_clone.session_key);
                                 let pid_clone = pcb.pid.clone();
 
-                                let _ = scheduler_tx_clone.send(SchedulerEvent::ScheduleTask(Box::new(pcb))).await;
+                                let _ = scheduler_tx_clone
+                                    .send(SchedulerEvent::ScheduleTask(Box::new(pcb)))
+                                    .await;
 
                                 let message_json = serde_json::json!({
                                     "transcript": text,
                                     "pid": pid_clone
-                                }).to_string();
+                                })
+                                .to_string();
 
                                 let _ = tx_events_stt.try_send(Ok(SirenEvent {
                                     event_type: "STT_DONE".to_string(),
@@ -198,11 +215,15 @@ impl SirenService for AnkSirenService {
                                 let (tx_task, mut rx_task) = tokio::sync::mpsc::channel(100);
                                 {
                                     let mut broker = event_broker_clone.write().await;
-                                    broker.entry(pid_clone.clone()).or_insert_with(Vec::new).push(tx_task);
+                                    broker
+                                        .entry(pid_clone.clone())
+                                        .or_insert_with(Vec::new)
+                                        .push(tx_task);
                                 }
 
-                                let (tts_tx, mut rx_tts) = tokio::sync::mpsc::channel::<String>(100);
-                                
+                                let (tts_tx, mut rx_tts) =
+                                    tokio::sync::mpsc::channel::<String>(100);
+
                                 // Dedicated TTS worker for cloud
                                 let tts_driver = driver_clone.clone();
                                 let tts_siren_tx = tx_events_stt.clone();
@@ -231,17 +252,21 @@ impl SirenService for AnkSirenService {
                                         }
                                     }
                                 });
-                                
+
                                 let mut accumulator = crate::tts::SentenceAccumulator::new(tts_tx);
 
                                 while let Some(task_event) = rx_task.recv().await {
                                     if let Some(payload) = task_event.payload {
                                         match payload {
-                                            ank_proto::v1::task_event::Payload::Thought(thought) => {
+                                            ank_proto::v1::task_event::Payload::Thought(
+                                                thought,
+                                            ) => {
                                                 accumulator.push_token(&thought).await;
                                             }
-                                            ank_proto::v1::task_event::Payload::StatusUpdate(update) => {
-                                                if update.state == ank_proto::v1::ProcessState::StateCompleted as i32 
+                                            ank_proto::v1::task_event::Payload::StatusUpdate(
+                                                update,
+                                            ) => {
+                                                if update.state == ank_proto::v1::ProcessState::StateCompleted as i32
                                                     || update.state == ank_proto::v1::ProcessState::StateTerminated as i32 {
                                                     accumulator.flush().await;
                                                     break;
@@ -264,7 +289,6 @@ impl SirenService for AnkSirenService {
                             }
                         }
                     });
-
                 } else if chunk.format == "pcm_16khz_16bit" {
                     speech_buffer.extend_from_slice(&chunk.data);
                 }
@@ -298,7 +322,9 @@ impl SirenService for AnkSirenService {
                 match in_stream.message().await {
                     Ok(Some(chunk)) => {
                         if tx_chunks.try_send(chunk).is_err() {
-                            let _ = tx_events_consumer.send(Err(Status::resource_exhausted("Audio buffer full"))).await;
+                            let _ = tx_events_consumer
+                                .send(Err(Status::resource_exhausted("Audio buffer full")))
+                                .await;
                             break;
                         }
                     }
@@ -316,9 +342,10 @@ impl SirenService for AnkSirenService {
         let whisper_ctx = self.whisper_ctx.clone();
         let scheduler_tx = self.scheduler_tx.clone();
         let event_broker = self.event_broker.clone();
-        
+
         tokio::spawn(async move {
-            let mut vad = Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, VadMode::VeryAggressive);
+            let mut vad =
+                Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, VadMode::VeryAggressive);
             let mut accumulator = Vec::with_capacity(1280);
             let mut speech_buffer: Vec<f32> = Vec::with_capacity(16000 * 5); // 5s buffer pre-allocated
             let mut vad_state = VadState::Silence;
@@ -328,17 +355,22 @@ impl SirenService for AnkSirenService {
             const SILENCE_THRESHOLD_FRAMES: usize = 30; // 600ms
 
             while let Some(chunk) = rx_chunks.recv().await {
-                if chunk.format != "pcm_16khz_16bit" { continue; }
+                if chunk.format != "pcm_16khz_16bit" {
+                    continue;
+                }
 
                 accumulator.extend_from_slice(&chunk.data);
 
                 while accumulator.len() >= FRAME_SIZE_BYTES {
                     let frame_u8: Vec<u8> = accumulator.drain(..FRAME_SIZE_BYTES).collect();
-                    let frame_i16: Vec<i16> = frame_u8.chunks_exact(2)
+                    let frame_i16: Vec<i16> = frame_u8
+                        .chunks_exact(2)
                         .map(|c| i16::from_le_bytes([c[0], c[1]]))
                         .collect();
 
-                    let is_voice = vad.is_voice(&frame_i16, SampleRate::Rate16kHz).unwrap_or(false);
+                    let is_voice = vad
+                        .is_voice(&frame_i16, SampleRate::Rate16kHz)
+                        .unwrap_or(false);
 
                     match vad_state {
                         VadState::Silence => {
@@ -348,14 +380,16 @@ impl SirenService for AnkSirenService {
                                 speech_buffer.clear();
                                 // Extend current frame into speech buffer
                                 speech_buffer.extend(frame_i16.iter().map(|&x| x as f32 / 32768.0));
-                                
-                                let _ = tx_events_worker.send(Ok(SirenEvent {
-                                    event_type: "VAD_START".to_string(),
-                                    message: "Speaking...".to_string(),
-                                    processed_sequence_number: chunk.sequence_number,
-                                    tts_audio_chunk: vec![],
-                                    sample_rate: 0,
-                                })).await;
+
+                                let _ = tx_events_worker
+                                    .send(Ok(SirenEvent {
+                                        event_type: "VAD_START".to_string(),
+                                        message: "Speaking...".to_string(),
+                                        processed_sequence_number: chunk.sequence_number,
+                                        tts_audio_chunk: vec![],
+                                        sample_rate: 0,
+                                    }))
+                                    .await;
                             }
                         }
                         VadState::Speech => {
@@ -368,13 +402,15 @@ impl SirenService for AnkSirenService {
                                     vad_state = VadState::Silence;
                                     silence_frames = 0;
 
-                                    let _ = tx_events_worker.send(Ok(SirenEvent {
-                                        event_type: "VAD_END".to_string(),
-                                        message: "Processing voice...".to_string(),
-                                        processed_sequence_number: chunk.sequence_number,
-                                        tts_audio_chunk: vec![],
-                                        sample_rate: 0,
-                                    })).await;
+                                    let _ = tx_events_worker
+                                        .send(Ok(SirenEvent {
+                                            event_type: "VAD_END".to_string(),
+                                            message: "Processing voice...".to_string(),
+                                            processed_sequence_number: chunk.sequence_number,
+                                            tts_audio_chunk: vec![],
+                                            sample_rate: 0,
+                                        }))
+                                        .await;
 
                                     // ANK-124: Offload STT to blocking thread
                                     let captured_audio = std::mem::take(&mut speech_buffer);
@@ -408,7 +444,10 @@ impl SirenService for AnkSirenService {
                                                 return;
                                             }
                                         };
-                                        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+                                        let mut params =
+                                            FullParams::new(SamplingStrategy::Greedy {
+                                                best_of: 1,
+                                            });
                                         params.set_n_threads(4);
                                         params.set_language(Some("es")); // Default Aegis Language
                                         params.set_print_special(false);
@@ -435,27 +474,44 @@ impl SirenService for AnkSirenService {
                                         }
 
                                         let text = text.trim().to_string();
-                                        
+
                                         // Noise Filter: Alucinaciones comunes de Whisper
-                                        if text.is_empty() || text.to_lowercase().contains("[musica]") || text.to_lowercase().contains("[silencio]") || text.len() < 2 {
-                                            info!("Whisper: Ignoring noise/hallucination: '{}'", text);
+                                        if text.is_empty()
+                                            || text.to_lowercase().contains("[musica]")
+                                            || text.to_lowercase().contains("[silencio]")
+                                            || text.len() < 2
+                                        {
+                                            info!(
+                                                "Whisper: Ignoring noise/hallucination: '{}'",
+                                                text
+                                            );
                                             return;
                                         }
 
-                                        info!("STT Result: '{}' (Tenant: {})", text, auth_clone.tenant_id);
+                                        info!(
+                                            "STT Result: '{}' (Tenant: {})",
+                                            text, auth_clone.tenant_id
+                                        );
 
                                         // Inyectar tarea al Scheduler
-                                        let mut pcb = CorePCB::new("Voice Command".to_string(), 10, text.clone());
+                                        let mut pcb = CorePCB::new(
+                                            "Voice Command".to_string(),
+                                            10,
+                                            text.clone(),
+                                        );
                                         pcb.tenant_id = Some(auth_clone.tenant_id);
                                         pcb.session_key = Some(auth_clone.session_key);
                                         let pid_clone = pcb.pid.clone();
 
-                                        let _ = scheduler_tx_clone.blocking_send(SchedulerEvent::ScheduleTask(Box::new(pcb)));
+                                        let _ = scheduler_tx_clone.blocking_send(
+                                            SchedulerEvent::ScheduleTask(Box::new(pcb)),
+                                        );
 
                                         let message_json = serde_json::json!({
                                             "transcript": text,
                                             "pid": pid_clone
-                                        }).to_string();
+                                        })
+                                        .to_string();
 
                                         let _ = tx_events_stt.try_send(Ok(SirenEvent {
                                             event_type: "STT_DONE".to_string(),
@@ -465,7 +521,8 @@ impl SirenService for AnkSirenService {
                                             sample_rate: 0,
                                         }));
 
-                                        let (tx_task, mut rx_task) = tokio::sync::mpsc::channel(100);
+                                        let (tx_task, mut rx_task) =
+                                            tokio::sync::mpsc::channel(100);
                                         let broker_clone = event_broker_clone.clone();
                                         let pid_for_broker = pid_clone.clone();
                                         let siren_tx_for_tts = tx_events_stt.clone();
@@ -473,13 +530,21 @@ impl SirenService for AnkSirenService {
                                         tokio::spawn(async move {
                                             {
                                                 let mut broker = broker_clone.write().await;
-                                                broker.entry(pid_for_broker).or_insert_with(Vec::new).push(tx_task);
+                                                broker
+                                                    .entry(pid_for_broker)
+                                                    .or_insert_with(Vec::new)
+                                                    .push(tx_task);
                                             }
 
                                             let (tts_tx, rx_tts) = tokio::sync::mpsc::channel(100);
-                                            crate::tts::spawn_tts_worker(rx_tts, siren_tx_for_tts, seq);
-                                            
-                                            let mut accumulator = crate::tts::SentenceAccumulator::new(tts_tx);
+                                            crate::tts::spawn_tts_worker(
+                                                rx_tts,
+                                                siren_tx_for_tts,
+                                                seq,
+                                            );
+
+                                            let mut accumulator =
+                                                crate::tts::SentenceAccumulator::new(tts_tx);
 
                                             while let Some(task_event) = rx_task.recv().await {
                                                 if let Some(payload) = task_event.payload {
@@ -488,7 +553,7 @@ impl SirenService for AnkSirenService {
                                                             accumulator.push_token(&thought).await;
                                                         }
                                                         ank_proto::v1::task_event::Payload::StatusUpdate(update) => {
-                                                            if update.state == ank_proto::v1::ProcessState::StateCompleted as i32 
+                                                            if update.state == ank_proto::v1::ProcessState::StateCompleted as i32
                                                                 || update.state == ank_proto::v1::ProcessState::StateTerminated as i32 {
                                                                 accumulator.flush().await;
                                                                 break;
@@ -499,7 +564,6 @@ impl SirenService for AnkSirenService {
                                                 }
                                             }
                                         });
-
                                     });
                                 }
                             } else {
@@ -546,7 +610,7 @@ mod tests {
 
         // Empaquetar stream como el request de tonic y agregar metadatos de auth falsos
         let mut request = Request::new(Box::pin(chunks_stream) as _);
-        
+
         let mut extensions = tonic::Extensions::new();
         extensions.insert(CitadelAuth {
             tenant_id: "test_tenant".to_string(),
@@ -562,9 +626,9 @@ mod tests {
         // Recorremos los eventos de respuesta, si los hubiera
         while let Some(resp) = tokio_stream::StreamExt::next(&mut response_stream).await {
             match resp {
-                Ok(_) => { /* Evento normal */ },
+                Ok(_) => { /* Evento normal */ }
                 Err(status) if status.code() == tonic::Code::ResourceExhausted => {
-                    // Backpressure activado correctamente si el worker asíncrono del test 
+                    // Backpressure activado correctamente si el worker asíncrono del test
                     // no dio abasto para desencolar 1000 iteraciones instantáneas.
                     println!("Test validó comportamiento SRE de Backpressure");
                     return Ok(());

@@ -1,4 +1,4 @@
-use crate::dag::{DagNode, ExecutionGraph, DagNodeStatus};
+use crate::dag::{DagNode, DagNodeStatus, ExecutionGraph};
 use crate::scheduler::ModelPreference;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -28,7 +28,10 @@ impl GraphCompiler {
         for node in graph.nodes.values() {
             for dep_id in &node.dependencies {
                 if !graph.nodes.contains_key(dep_id) {
-                    return Err(GraphError::MissingDependency(node.node_id.clone(), dep_id.clone()));
+                    return Err(GraphError::MissingDependency(
+                        node.node_id.clone(),
+                        dep_id.clone(),
+                    ));
                 }
             }
         }
@@ -57,7 +60,10 @@ impl GraphCompiler {
         if let Some(node) = graph.nodes.get(node_id) {
             for dep_id in &node.dependencies {
                 if visiting.contains(dep_id) {
-                    return Err(GraphError::CyclicDependency(format!("{} -> {}", node_id, dep_id)));
+                    return Err(GraphError::CyclicDependency(format!(
+                        "{} -> {}",
+                        node_id, dep_id
+                    )));
                 }
                 if !visited.contains(dep_id) {
                     Self::check_cycles(dep_id, graph, visited, visiting)?;
@@ -74,10 +80,10 @@ impl GraphCompiler {
     /// Genera un grafo monolítico de emergencia si la compilación del S-DAG falla.
     pub fn create_fallback(original_prompt: &str) -> ExecutionGraph {
         warn!(prompt = %original_prompt, "Graph compilation failed, falling back to monolithic node");
-        
+
         let mut nodes = HashMap::new();
         let fallback_node_id = format!("monolithic_{}", Uuid::new_v4().to_string().split_at(8).0);
-        
+
         nodes.insert(
             fallback_node_id.clone(),
             DagNode {
@@ -91,7 +97,10 @@ impl GraphCompiler {
         );
 
         ExecutionGraph {
-            graph_id: format!("graph_fallback_{}", Uuid::new_v4().to_string().split_at(8).0),
+            graph_id: format!(
+                "graph_fallback_{}",
+                Uuid::new_v4().to_string().split_at(8).0
+            ),
             original_prompt: original_prompt.to_string(),
             nodes,
         }
@@ -122,7 +131,7 @@ mod tests {
         nodes.insert("B".to_string(), create_test_node("B", vec!["A"]));
         nodes.insert("C".to_string(), create_test_node("C", vec!["A"]));
         nodes.insert("D".to_string(), create_test_node("D", vec!["B", "C"]));
-        
+
         let graph = ExecutionGraph {
             graph_id: "test".to_string(),
             original_prompt: "test".to_string(),
@@ -137,7 +146,7 @@ mod tests {
         let mut nodes = HashMap::new();
         nodes.insert("A".to_string(), create_test_node("A", vec!["B"]));
         nodes.insert("B".to_string(), create_test_node("B", vec!["A"]));
-        
+
         let graph = ExecutionGraph {
             graph_id: "test".to_string(),
             original_prompt: "test".to_string(),
@@ -146,14 +155,17 @@ mod tests {
 
         let result = GraphCompiler::validate(&graph);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), GraphError::CyclicDependency(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            GraphError::CyclicDependency(_)
+        ));
     }
 
     #[test]
     fn test_reject_missing_dependency() {
         let mut nodes = HashMap::new();
         nodes.insert("A".to_string(), create_test_node("A", vec!["NON_EXISTENT"]));
-        
+
         let graph = ExecutionGraph {
             graph_id: "test".to_string(),
             original_prompt: "test".to_string(),
@@ -162,14 +174,17 @@ mod tests {
 
         let result = GraphCompiler::validate(&graph);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), GraphError::MissingDependency(_, _)));
+        assert!(matches!(
+            result.unwrap_err(),
+            GraphError::MissingDependency(_, _)
+        ));
     }
 
     #[test]
     fn test_fallback_generation() {
         let prompt = "Solve the Riemann hypothesis";
         let fallback = GraphCompiler::create_fallback(prompt);
-        
+
         assert_eq!(fallback.nodes.len(), 1);
         let node = fallback.nodes.values().next().unwrap();
         assert_eq!(node.description, prompt);

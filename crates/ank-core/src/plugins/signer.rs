@@ -1,5 +1,5 @@
+use anyhow::{Context, Result};
 use ed25519_dalek::{PublicKey, Signature, Verifier};
-use anyhow::{Result, Context};
 use std::fs;
 use std::path::Path;
 
@@ -11,8 +11,8 @@ impl PluginSigner {
     /// Inicializa el verificador con la llave pública de Aegis.
     /// En producción, esto vendría de una variable de entorno o almacén de llaves.
     pub fn new(public_key_bytes: &[u8; 32]) -> Result<Self> {
-        let pub_key = PublicKey::from_bytes(public_key_bytes)
-            .context("Invalid Ed25519 public key bytes")?;
+        let pub_key =
+            PublicKey::from_bytes(public_key_bytes).context("Invalid Ed25519 public key bytes")?;
         Ok(Self { pub_key })
     }
 
@@ -30,10 +30,10 @@ impl PluginSigner {
         let sig_bytes = fs::read(&sig_path)
             .with_context(|| format!("Failed to read signature file: {:?}", sig_path))?;
 
-        let signature = Signature::from_slice(&sig_bytes)
-            .context("Invalid signature format")?;
+        let signature = Signature::from_slice(&sig_bytes).context("Invalid signature format")?;
 
-        self.pub_key.verify(&wasm_bytes, &signature)
+        self.pub_key
+            .verify(&wasm_bytes, &signature)
             .context("Plugin signature verification failed (Ring 0 Violation)")?;
 
         Ok(())

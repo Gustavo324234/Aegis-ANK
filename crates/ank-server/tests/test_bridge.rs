@@ -2,7 +2,7 @@ use ank_core::SchedulerEvent;
 use ank_proto::v1::kernel_service_server::KernelService;
 use ank_proto::v1::{Priority as ProtoPriority, TaskRequest};
 use ank_server::server::AnkRpcServer;
-use anyhow::Context;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};

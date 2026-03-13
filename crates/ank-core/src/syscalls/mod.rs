@@ -1,5 +1,6 @@
 use crate::plugins::PluginManager;
 use crate::scribe::CommitMetadata;
+use anyhow::Context;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};

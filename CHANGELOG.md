@@ -117,6 +117,12 @@
   - **`sse.rs`**: Refactorización del parsing de eventos SSE utilizando `strip_prefix` para una gestión de strings más segura y performante.
   - **Zero-Panic Consistency**: Auditoría de cambios garantizando la ausencia de `.unwrap()` y manteniendo la estabilidad del Ring 0.
 
+- **[ANK-908] Dependency Hell Resolution & Explicit Anyhow Imports:**
+  - **Explicit Imports**: Se ha inyectado `use anyhow::Context;` en todos los archivos del workspace que utilizan métodos de extensión de contexto, resolviendo fallos de resolución de tipos en el compilador.
+  - **Wasmtime v29 Alignment**: Refactorización del `PluginManager` para eliminar el uso de `wasmtime::Trap::UnreachableCode` (deprecado/removido en v29), reemplazándolo por capturas de traps genéricas y específicas compatibles con la nueva API.
+  - **CI Robustness**: Verificación de la instalación de `protobuf-compiler` en el pipeline de GitHub Actions para garantizar la disponibilidad de `protoc`.
+  - **Crate Versioning**: Incremento de versiones a `ank-core v0.5.2` y `ank-proto v0.1.4` reflejando los cambios estructurales de dependencias.
+
 ## [1.5.1] - Unreleased
 
 ### Added

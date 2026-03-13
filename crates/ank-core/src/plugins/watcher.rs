@@ -1,4 +1,5 @@
 use crate::plugins::PluginManager;
+use anyhow::Context;
 use notify::{RecursiveMode, Watcher};
 use notify_debouncer_mini::{new_debouncer, DebouncedEvent};
 use std::path::Path;

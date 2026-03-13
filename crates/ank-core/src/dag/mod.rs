@@ -1,6 +1,6 @@
 use crate::pcb::PCB;
 use crate::scheduler::ModelPreference;
-use anyhow::{bail, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -128,7 +128,7 @@ impl GraphManager {
                 return Ok(());
             }
         }
-        bail!("Node {} not found in any active graph", result.node_id)
+        anyhow::bail!("Node {} not found in any active graph", result.node_id)
     }
 
     /// Implementación del Planner S-DAG

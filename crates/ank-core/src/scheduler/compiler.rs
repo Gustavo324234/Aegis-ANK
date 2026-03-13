@@ -1,6 +1,6 @@
 use crate::dag::{DagNode, DagNodeStatus, ExecutionGraph};
 use crate::scheduler::ModelPreference;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tracing::warn;

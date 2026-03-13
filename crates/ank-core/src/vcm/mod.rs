@@ -1,5 +1,6 @@
 use crate::pcb::PCB;
 use crate::vcm::swap::LanceSwapManager;
+use anyhow::Context;
 use std::path::{Component, Path};
 use thiserror::Error;
 use tracing::warn;

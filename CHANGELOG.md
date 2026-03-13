@@ -110,6 +110,13 @@
   - Modificación de `build.rs` en `ank-proto` para aplicar el atributo `#[prost(boxed)]` a la variante `status_update` (super::Pcb) del mensaje `TaskEvent`.
   - Resolución del bloqueo de compilación causado por el lint `clippy::large_enum_variant` en entornos de auditoría estricta (SRE Firewall).
 
+- **[ANK-906] Clippy Refactor & Idiomatic Rust Fixes:**
+  - **`stdio.rs`**: Eliminado el import redundante de `StreamExt` en el top-level para cumplir con `unused_imports`.
+  - **`client.rs`**: Abstracción del tipo complejo del mapa de peticiones mediante el alias `PendingRequests`, mejorando la legibilidad arquitectónica.
+  - **`registry.rs`**: Implementación explícita del trait `Default` para `McpToolRegistry` siguiendo las recomendaciones de Clippy.
+  - **`sse.rs`**: Refactorización del parsing de eventos SSE utilizando `strip_prefix` para una gestión de strings más segura y performante.
+  - **Zero-Panic Consistency**: Auditoría de cambios garantizando la ausencia de `.unwrap()` y manteniendo la estabilidad del Ring 0.
+
 ## [1.5.1] - Unreleased
 
 ### Added

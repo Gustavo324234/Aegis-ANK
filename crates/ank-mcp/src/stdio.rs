@@ -1,7 +1,7 @@
 use crate::transport::{JsonRpcMessage, McpTransport};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use futures_util::{Stream, StreamExt};
+use futures_util::Stream;
 use serde_json;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -145,6 +145,7 @@ impl Drop for StdioTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::StreamExt;
     use std::env;
 
     #[tokio::test]

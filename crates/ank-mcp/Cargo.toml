@@ -1,6 +1,6 @@
 [package]
 name = "ank-mcp"
-version = "1.4.0"
+version = "1.4.1"
 edition = "2021"
 authors = ["Antigravity <sre@aegis-os.tech>"]
 description = "Model Context Protocol (MCP) Client for Aegis Neural Kernel"

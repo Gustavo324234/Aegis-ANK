@@ -22,6 +22,12 @@ pub struct McpToolRegistry {
     tools: RwLock<HashMap<String, McpTool>>,
 }
 
+impl Default for McpToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpToolRegistry {
     pub fn new() -> Self {
         Self {

@@ -100,11 +100,9 @@ impl McpTransport for SseTransport {
                     let line = line.trim();
 
                     if line.starts_with("data:") {
-                        let json_str = if line.starts_with("data: ") {
-                            &line[6..]
-                        } else {
-                            &line[5..]
-                        };
+                        let json_str = line.strip_prefix("data: ")
+                            .or_else(|| line.strip_prefix("data:"))
+                            .unwrap_or(line);
 
                         if !json_str.is_empty() {
                             let msg: JsonRpcMessage = serde_json::from_str(json_str)

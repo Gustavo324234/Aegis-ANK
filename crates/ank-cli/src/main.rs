@@ -196,7 +196,7 @@ async fn main() -> Result<()> {
 
             // Hook for graceful ctrl-c
             tokio::spawn(async move {
-                if let Ok(_) = tokio::signal::ctrl_c().await {
+                if tokio::signal::ctrl_c().await.is_ok() {
                     println!("\n[SRE Guard] Stream cancelled by user (Ctrl+C). Exiting cleanly.");
                     process::exit(0);
                 }

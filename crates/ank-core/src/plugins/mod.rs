@@ -1,6 +1,6 @@
+use anyhow::Context;
 use std::collections::HashMap;
 use std::path::Path;
-use anyhow::Context;
 use thiserror::Error;
 use tracing::{error, info, warn};
 use wasmtime::{Config, Engine, Linker, Module, Store};
@@ -407,7 +407,12 @@ impl PluginManager {
                     wasmtime::Trap::StackOverflow => {
                         return Err(PluginError::LogicError(format!("Runtime Trap: {}", trap)));
                     }
-                    _ => return Err(PluginError::LogicError(format!("Unknown or Unreachable Trap: {}", trap))),
+                    _ => {
+                        return Err(PluginError::LogicError(format!(
+                            "Unknown or Unreachable Trap: {}",
+                            trap
+                        )))
+                    }
                 }
             }
             return Err(PluginError::ExecutionFailed(e.to_string()));

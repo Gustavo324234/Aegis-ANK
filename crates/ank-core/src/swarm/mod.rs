@@ -202,8 +202,8 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_swarm_registry_flow() {
-        let manager = SwarmManager::new("node-alpha".into(), 50051, 3, 32, 48).unwrap();
+    async fn test_swarm_registry_flow() -> anyhow::Result<()> {
+        let manager = SwarmManager::new("node-alpha".into(), 50051, 3, 32, 48)?;
         assert_eq!(manager.local_node_id, "node-alpha");
 
         // Simulación de ruteo
@@ -227,5 +227,6 @@ mod tests {
 
         let nodes = manager.active_nodes.read().await;
         assert!(nodes.contains_key("node-beta"));
+        Ok(())
     }
 }

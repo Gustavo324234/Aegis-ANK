@@ -103,8 +103,7 @@ impl SirenService for AnkSirenService {
         };
 
         info!(
-            "Siren stream connected (Cloud) for Tenant: {}",
-            auth.tenant_id
+            "Siren stream connected (Cloud) for Tenant: [REDACTED]"
         );
 
         let mut in_stream = request.into_inner();
@@ -184,8 +183,8 @@ impl SirenService for AnkSirenService {
                                 }
 
                                 info!(
-                                    "STT Cloud Result: '{}' (Tenant: {})",
-                                    text, auth_clone.tenant_id
+                                    "STT Cloud Result: '{}' (Tenant: [REDACTED])",
+                                    text
                                 );
 
                                 let mut pcb =
@@ -309,7 +308,7 @@ impl SirenService for AnkSirenService {
             .cloned()
             .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
 
-        info!("Siren stream connected for Tenant: {}", auth.tenant_id);
+        info!("Siren stream connected for Tenant: [REDACTED]");
 
         let mut in_stream = request.into_inner();
         let (tx_chunks, mut rx_chunks) = mpsc::channel::<AudioChunk>(200);
@@ -489,8 +488,8 @@ impl SirenService for AnkSirenService {
                                         }
 
                                         info!(
-                                            "STT Result: '{}' (Tenant: {})",
-                                            text, auth_clone.tenant_id
+                                            "STT Result: '{}' (Tenant: [REDACTED])",
+                                            text
                                         );
 
                                         // Inyectar tarea al Scheduler

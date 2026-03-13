@@ -45,10 +45,11 @@ mod tests {
     use super::*;
     use crate::dag::{DagNode, DagNodeStatus, ExecutionGraph};
     use crate::scheduler::ModelPreference;
+    use anyhow::Context;
     use std::collections::HashMap;
 
     #[test]
-    fn test_integration_fallback_activation() {
+    fn test_integration_fallback_activation() -> anyhow::Result<()> {
         let mut manager = GraphManager::new();
 
         // Grafo con ciclo: A -> B -> A
@@ -86,12 +87,15 @@ mod tests {
         GraphIntegrator::validate_and_register(&mut manager, cyclic_graph);
 
         assert_eq!(manager.active_graphs.len(), 1);
-        let registered_graph = manager.active_graphs.values().next().unwrap();
+        let registered_graph = manager.active_graphs.values().next()
+            .context("Active graphs should contain the fallback")?;
 
         // Debe ser el grafo de fallback (monolítico)
         assert!(registered_graph.graph_id.starts_with("graph_fallback_"));
         assert_eq!(registered_graph.nodes.len(), 1);
-        let node = registered_graph.nodes.values().next().unwrap();
+        let node = registered_graph.nodes.values().next()
+            .context("Fallback graph should contain one node")?;
         assert_eq!(node.description, "Create a cycle");
+        Ok(())
     }
 }

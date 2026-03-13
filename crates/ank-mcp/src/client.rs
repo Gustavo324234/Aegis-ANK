@@ -232,7 +232,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_session_timeout() {
+    async fn test_client_session_timeout() -> anyhow::Result<()> {
         let transport = MockTransport {
             delay: Duration::from_secs(40),
         }; // Mayor que el timeout de 30s
@@ -242,7 +242,8 @@ mod tests {
 
         match result {
             Err(McpError::Timeout) => info!("Test pasado: Timeout detectado correctamente"),
-            other => panic!("Se esperaba McpError::Timeout, se obtuvo: {:?}", other),
+            other => anyhow::bail!("Se esperaba McpError::Timeout, se obtuvo: {:?}", other),
         }
+        Ok(())
     }
 }

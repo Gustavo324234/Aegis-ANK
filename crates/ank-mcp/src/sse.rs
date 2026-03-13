@@ -151,7 +151,8 @@ mod tests {
                 method: "test/event".to_string(),
                 params: Some(serde_json::json!({"data": "hello"})),
             };
-            let json_msg = serde_json::to_string(&msg).unwrap();
+            let json_msg = serde_json::to_string(&msg)
+                .context("Failed to serialize SSE test message")?;
             let _ = tx_sse.send(Ok::<_, Infallible>(
                 warp::sse::Event::default().data(json_msg),
             ));
@@ -188,7 +189,7 @@ mod tests {
         if let JsonRpcMessage::Request { method, .. } = received_by_server {
             assert_eq!(method, "ping");
         } else {
-            panic!("Wrong message type received by server");
+            anyhow::bail!("Wrong message type received by server");
         }
 
         // 4. Test receiving SSE
@@ -200,10 +201,10 @@ mod tests {
             if let JsonRpcMessage::Notification { method, .. } = msg {
                 assert_eq!(method, "test/event");
             } else {
-                panic!("Wrong message type received via SSE");
+                anyhow::bail!("Wrong message type received via SSE");
             }
         } else {
-            panic!("SSE stream closed prematurely");
+            anyhow::bail!("SSE stream closed prematurely");
         }
 
         // Cleanup

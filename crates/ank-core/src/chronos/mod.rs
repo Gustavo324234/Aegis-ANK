@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_chronos_scheduling_injection() {
+    async fn test_chronos_scheduling_injection() -> anyhow::Result<()> {
         let scheduler = Arc::new(RwLock::new(CognitiveScheduler::new(Arc::new(
             persistence::MockPersistor,
         ))));
@@ -177,15 +177,16 @@ mod tests {
             sched_w.last_activity = Utc::now() - chrono::Duration::seconds(1);
         }
 
-        chronos.run_step().await.expect("Run step should succeed");
+        chronos.run_step().await.context("Run step should succeed")?;
 
         // Verificamos que se envió el evento de ScheduleTask
-        let event = rx.try_recv().expect("Should have received an event");
+        let event = rx.try_recv().context("Should have received an event")?;
         if let SchedulerEvent::ScheduleTask(pcb) = event {
             assert_eq!(pcb.process_name, "ChronosConsolidator");
             assert_eq!(pcb.priority, 1);
         } else {
-            panic!("Received wrong event type");
+            anyhow::bail!("Received wrong event type");
         }
+        Ok(())
     }
 }

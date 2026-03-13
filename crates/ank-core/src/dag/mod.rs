@@ -183,9 +183,10 @@ impl GraphManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[test]
-    fn test_diamond_graph_parallel_execution() {
+    fn test_diamond_graph_parallel_execution() -> anyhow::Result<()> {
         let mut manager = GraphManager::new();
 
         // Estructura Diamante: A -> [B, C] -> D
@@ -262,7 +263,7 @@ mod tests {
                 output: "Output from A".into(),
                 status: DagNodeStatus::Completed,
             })
-            .unwrap();
+            ?;
 
         // 3. Tick: B y C deben salir en PARALELO
         println!("[DEBUG] Tick 2 (B and C)...");
@@ -280,7 +281,7 @@ mod tests {
                 output: "Code B".into(),
                 status: DagNodeStatus::Completed,
             })
-            .unwrap();
+            ?;
 
         println!("[DEBUG] Tick 3 (Should be empty)...");
         assert!(manager.tick().is_empty());
@@ -293,7 +294,7 @@ mod tests {
                 output: "Code C".into(),
                 status: DagNodeStatus::Completed,
             })
-            .unwrap();
+            ?;
 
         // 6. Tick: D debe salir con el contexto de B y C inyectado
         println!("[DEBUG] Tick 4 (D)...");
@@ -305,9 +306,18 @@ mod tests {
         assert_eq!(pcb_d.process_name, "D");
 
         // Verificar Context Forwarding (Join/Gather)
-        assert_eq!(pcb_d.inlined_context.get("dependency_B").unwrap(), "Code B");
-        assert_eq!(pcb_d.inlined_context.get("dependency_C").unwrap(), "Code C");
+        assert_eq!(
+            pcb_d.inlined_context.get("dependency_B")
+                .context("dependency_B should be present")?,
+            "Code B"
+        );
+        assert_eq!(
+            pcb_d.inlined_context.get("dependency_C")
+                .context("dependency_C should be present")?,
+            "Code C"
+        );
 
         println!("Diamond Graph Flow: SUCCESS. Task D gathered parallel context correctly.");
+        Ok(())
     }
 }

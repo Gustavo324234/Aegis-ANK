@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_cyclic_graph() {
+    fn test_reject_cyclic_graph() -> anyhow::Result<()> {
         let mut nodes = HashMap::new();
         nodes.insert("A".to_string(), create_test_node("A", vec!["B"]));
         nodes.insert("B".to_string(), create_test_node("B", vec!["A"]));
@@ -155,14 +155,13 @@ mod tests {
 
         let result = GraphCompiler::validate(&graph);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            GraphError::CyclicDependency(_)
-        ));
+        let err = result.expect_err("Validation should fail for cyclic graph");
+        assert!(matches!(err, GraphError::CyclicDependency(_)));
+        Ok(())
     }
 
     #[test]
-    fn test_reject_missing_dependency() {
+    fn test_reject_missing_dependency() -> anyhow::Result<()> {
         let mut nodes = HashMap::new();
         nodes.insert("A".to_string(), create_test_node("A", vec!["NON_EXISTENT"]));
 
@@ -174,21 +173,22 @@ mod tests {
 
         let result = GraphCompiler::validate(&graph);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            GraphError::MissingDependency(_, _)
-        ));
+        let err = result.expect_err("Validation should fail for missing dependency");
+        assert!(matches!(err, GraphError::MissingDependency(_, _)));
+        Ok(())
     }
 
     #[test]
-    fn test_fallback_generation() {
+    fn test_fallback_generation() -> anyhow::Result<()> {
         let prompt = "Solve the Riemann hypothesis";
         let fallback = GraphCompiler::create_fallback(prompt);
 
         assert_eq!(fallback.nodes.len(), 1);
-        let node = fallback.nodes.values().next().unwrap();
+        let node = fallback.nodes.values().next()
+            .context("Fallback graph should have one node")?;
         assert_eq!(node.description, prompt);
         assert!(node.dependencies.is_empty());
         assert!(fallback.graph_id.starts_with("graph_fallback_"));
+        Ok(())
     }
 }

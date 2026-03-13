@@ -275,31 +275,32 @@ impl MasterEnclave {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn test_master_admin_flow() {
-        let dir = tempdir().unwrap();
+    async fn test_master_admin_flow() -> anyhow::Result<()> {
+        let dir = tempdir().context("Failed to create tempdir")?;
         let db_path = dir.path().join("admin.db");
-        let path_str = db_path.to_str().unwrap();
+        let path_str = db_path.to_str().context("Path is not valid UTF-8")?;
 
-        let enclave = MasterEnclave::open(path_str, "secret_key").await.unwrap();
+        let enclave = MasterEnclave::open(path_str, "secret_key").await?;
 
-        assert!(!enclave.is_initialized().await.unwrap());
+        assert!(!enclave.is_initialized().await?);
 
-        enclave.initialize_master("root", "haxor").await.unwrap();
-        assert!(enclave.is_initialized().await.unwrap());
+        enclave.initialize_master("root", "haxor").await?;
+        assert!(enclave.is_initialized().await?);
 
-        let is_auth = enclave.authenticate_master("root", "haxor").await.unwrap();
+        let is_auth = enclave.authenticate_master("root", "haxor").await?;
         assert!(is_auth);
 
-        let (port, pass) = enclave.create_tenant("testuser").await.unwrap();
+        let (port, pass) = enclave.create_tenant("testuser").await?;
         assert!(port >= 50052);
         assert!(!pass.is_empty());
 
         enclave
             .reset_tenant_password("testuser", "ignored_for_now")
-            .await
-            .unwrap();
+            .await?;
+        Ok(())
     }
 }

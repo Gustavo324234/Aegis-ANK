@@ -337,9 +337,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_plugin_call() {
+    fn test_parse_plugin_call() -> anyhow::Result<()> {
         let stream = "El resultado es: [SYS_CALL_PLUGIN(\"weather\", {\"city\": \"Paris\"})]";
-        let syscall = parse_syscall(stream).expect("Should parse plugin call");
+        let syscall = parse_syscall(stream).context("Should parse plugin call")?;
 
         if let Syscall::PluginCall {
             plugin_name,
@@ -349,42 +349,46 @@ mod tests {
             assert_eq!(plugin_name, "weather");
             assert_eq!(args_json, "{\"city\": \"Paris\"}");
         } else {
-            panic!("Wrong syscall type");
+            anyhow::bail!("Wrong syscall type");
         }
+        Ok(())
     }
 
     #[test]
-    fn test_parse_read_file() {
+    fn test_parse_read_file() -> anyhow::Result<()> {
         let stream = "Necesito ver el código: [READ_FILE(\"src/main.rs\")]";
-        let syscall = parse_syscall(stream).expect("Should parse read call");
+        let syscall = parse_syscall(stream).context("Should parse read call")?;
 
         if let Syscall::ReadFile { uri } = syscall {
             assert_eq!(uri, "src/main.rs");
         } else {
-            panic!("Wrong syscall type");
+            anyhow::bail!("Wrong syscall type");
         }
+        Ok(())
     }
 
     #[test]
-    fn test_parse_write_file() {
+    fn test_parse_write_file() -> anyhow::Result<()> {
         let stream = "[WRITE_FILE(\"output.txt\", \"Hello World\", {\"task_id\": \"ANK-101\", \"version_increment\": \"patch\", \"summary\": \"test\", \"impact\": \"low\"})]";
-        let syscall = parse_syscall(stream).expect("Should parse write call");
+        let syscall = parse_syscall(stream).context("Should parse write call")?;
 
         if let Syscall::WriteFile { uri, content, .. } = syscall {
             assert_eq!(uri, "output.txt");
             assert_eq!(content, "Hello World");
         } else {
-            panic!("Wrong syscall type");
+            anyhow::bail!("Wrong syscall type");
         }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_syscall_execution_format() {
-        let manager = Arc::new(tokio::sync::RwLock::new(PluginManager::new().unwrap()));
+    async fn test_syscall_execution_format() -> anyhow::Result<()> {
+        let manager = Arc::new(tokio::sync::RwLock::new(PluginManager::new()?));
         let vcm = Arc::new(VirtualContextManager::new());
         let scribe = Arc::new(ScribeManager::new("./users_test"));
         let swap = Arc::new(LanceSwapManager::new("./swap_test"));
-        let executor = SyscallExecutor::new(manager, vcm, scribe, swap);
+        let mcp_registry = Arc::new(ank_mcp::registry::McpToolRegistry::new());
+        let executor = SyscallExecutor::new(manager, vcm, scribe, swap, mcp_registry);
 
         let pcb = crate::pcb::PCB::new("test".into(), 5, "test".into());
 
@@ -396,15 +400,17 @@ mod tests {
 
         let res = executor.execute(&pcb, syscall).await;
         assert!(matches!(res, Err(SyscallError::PluginError(_))));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_ssrf_guard_blocking() {
-        let manager = Arc::new(tokio::sync::RwLock::new(PluginManager::new().unwrap()));
+    async fn test_ssrf_guard_blocking() -> anyhow::Result<()> {
+        let manager = Arc::new(tokio::sync::RwLock::new(PluginManager::new()?));
         let vcm = Arc::new(VirtualContextManager::new());
         let scribe = Arc::new(ScribeManager::new("./users_test"));
         let swap = Arc::new(LanceSwapManager::new("./swap_test"));
-        let executor = SyscallExecutor::new(manager, vcm, scribe, swap);
+        let mcp_registry = Arc::new(ank_mcp::registry::McpToolRegistry::new());
+        let executor = SyscallExecutor::new(manager, vcm, scribe, swap, mcp_registry);
 
         // Intentar acceder a localhost
         let res = executor.fetch_url_safe("http://127.0.0.1:8080/admin").await;
@@ -416,5 +422,6 @@ mod tests {
             res_private,
             Err(SyscallError::SecurityViolation(_))
         ));
+        Ok(())
     }
 }

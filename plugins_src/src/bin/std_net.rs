@@ -56,7 +56,9 @@ fn clean_html(html: &str) -> String {
                 let mut tag_acc = String::new();
                 while let Some(&next_c) = chars.peek() {
                     if next_c == '>' || next_c.is_whitespace() { break; }
-                    tag_acc.push(chars.next().unwrap().to_ascii_lowercase());
+                    if let Some(next_char) = chars.next() {
+                        tag_acc.push(next_char.to_ascii_lowercase());
+                    }
                 }
                 if tag_acc == "script" || tag_acc == "style" {
                     in_script_or_style = true;

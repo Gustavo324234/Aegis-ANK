@@ -526,8 +526,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_wasm_execution_trap_handling() {
-        let mut manager = PluginManager::new().unwrap();
+    async fn test_wasm_execution_trap_handling() -> anyhow::Result<()> {
+        let mut manager = PluginManager::new()?;
 
         // Un wasm mínimo que hace un unreachable (trap)
         let wasm_bytes = [
@@ -536,14 +536,18 @@ mod tests {
             0x00, 0x00, 0x0a, 0x05, 0x01, 0x03, 0x00, 0x00, 0x0b,
         ];
 
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(&wasm_bytes).unwrap();
-        let path = file.path().to_str().unwrap();
+        let mut file = NamedTempFile::new()
+            .context("Failed to create temp file")?;
+        file.write_all(&wasm_bytes)
+            .context("Failed to write wasm bytes")?;
+        let path = file.path().to_str()
+            .context("Temp file path is not UTF-8")?;
 
-        manager.load_plugin(path).await.unwrap();
+        manager.load_plugin(path).await?;
         let res = manager.execute_plugin("test_tenant", "test", "{}").await;
 
         assert!(res.is_err());
         // Debe ser un ExecutionTrap o similar
+        Ok(())
     }
 }

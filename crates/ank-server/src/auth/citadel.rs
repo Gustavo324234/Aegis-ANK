@@ -42,17 +42,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tenant_id_obfuscation() {
+    fn test_tenant_id_obfuscation() -> anyhow::Result<()> {
         let root_key = b"Aegis_Master_Secret";
         let tenant_id = "tenant-42";
 
-        let hash1 = generate_public_tenant_id(tenant_id, root_key).expect("Should generate hash");
-        let hash2 =
-            generate_public_tenant_id(tenant_id, root_key).expect("Should be deterministic");
+        let hash1 = generate_public_tenant_id(tenant_id, root_key)?;
+        let hash2 = generate_public_tenant_id(tenant_id, root_key)?;
 
         assert_eq!(hash1, hash2);
         assert!(!hash1.contains(tenant_id));
         assert!(!hash1.is_empty());
+        Ok(())
     }
 
     #[test]

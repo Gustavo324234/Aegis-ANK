@@ -188,10 +188,10 @@ mod tests {
                 assert_eq!(id, serde_json::json!(42));
                 assert_eq!(method, "ping");
             } else {
-                panic!("Tipo de mensaje recibido incorrecto: {:?}", msg);
+                anyhow::bail!("Tipo de mensaje recibido incorrecto: {:?}", msg);
             }
         } else {
-            panic!("Stream cerrado prematuramente");
+            anyhow::bail!("Stream cerrado prematuramente");
         }
 
         Ok(())

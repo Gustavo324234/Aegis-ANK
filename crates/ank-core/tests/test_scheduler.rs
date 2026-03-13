@@ -1,12 +1,13 @@
 use ank_core::{CognitiveScheduler, SQLCipherPersistor, SchedulerEvent, PCB};
+use anyhow::Context;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
 #[tokio::test]
-async fn test_scheduler_priority_and_preemption() {
+async fn test_scheduler_priority_and_preemption() -> anyhow::Result<()> {
     // Base de datos en memoria para la prueba de integración
-    let persistence = Arc::new(SQLCipherPersistor::new(":memory:", "test_key").unwrap());
+    let persistence = Arc::new(SQLCipherPersistor::new(":memory:", "test_key")?);
     let scheduler = CognitiveScheduler::new(persistence);
     let (tx, rx) = mpsc::channel(100);
     let tx_internal = tx.clone();
@@ -20,7 +21,7 @@ async fn test_scheduler_priority_and_preemption() {
     let pcb_med = PCB::new("MedPriority".to_string(), 5, "Prompt 1".to_string());
     tx.send(SchedulerEvent::ScheduleTask(Box::new(pcb_med.clone())))
         .await
-        .unwrap();
+        .context("Failed to send medium priority task")?;
 
     // Esperar un poco para el despacho inicial
     sleep(Duration::from_millis(150)).await;
@@ -29,7 +30,7 @@ async fn test_scheduler_priority_and_preemption() {
     let pcb_high = PCB::new("HighPriority".to_string(), 10, "Prompt 2".to_string());
     tx.send(SchedulerEvent::ScheduleTask(Box::new(pcb_high.clone())))
         .await
-        .unwrap();
+        .context("Failed to send high priority task")?;
 
     // Esperar a que el scheduler procese el evento y la ponga en Ready Queue
     sleep(Duration::from_millis(150)).await;
@@ -37,4 +38,5 @@ async fn test_scheduler_priority_and_preemption() {
     // En este punto, como no hay un driver real consumiendo el 'current_running',
     // el Scheduler simplemente despacha el primero (prioridad 5) y mantiene el resto en Ready.
     // La prioridad 10 debería estar al tope de la Ready Queue ahora.
+    Ok(())
 }

@@ -283,39 +283,44 @@ pub fn is_safe_path(_tenant_id: &str, path_str: &str) -> bool {
 mod tests {
     use super::*;
     use crate::pcb::PCB;
+    use anyhow::Context;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
     #[tokio::test]
-    async fn test_assemble_basic_context() {
+    async fn test_assemble_basic_context() -> anyhow::Result<()> {
         let vcm = VirtualContextManager::new();
         let swap = LanceSwapManager::new("./test_users"); // Mock
         let pcb = PCB::new("TestProcess".into(), 5, "Summarize this".into());
 
         // Límite generoso
-        let context = vcm.assemble_context(&pcb, &swap, 1000).await.unwrap();
+        let context = vcm.assemble_context(&pcb, &swap, 1000).await?;
 
         assert!(context.contains("SYSTEM: Aegis Neural Kernel VCM"));
         assert!(context.contains("Summarize this"));
         // El orden es SYSTEM -> DAG -> L2 -> L3 -> L1
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_vcm_file_omission_on_overflow() {
+    async fn test_vcm_file_omission_on_overflow() -> anyhow::Result<()> {
         let vcm = VirtualContextManager::new();
         let swap = LanceSwapManager::new("./test_users");
 
         // Crear estructura de directorios para el tenant default
         let workspace_path = "./users/default/workspace";
-        tokio::fs::create_dir_all(workspace_path).await.unwrap();
+        tokio::fs::create_dir_all(workspace_path).await
+            .context("Failed to create workspace dir")?;
 
         // Crear un archivo temporal con ruta relativa dentro del workspace del tenant
         let file_name = "test_overflow_dummy.txt";
         let full_path = std::path::Path::new(workspace_path).join(file_name);
 
-        let mut file = std::fs::File::create(&full_path).unwrap();
+        let mut file = std::fs::File::create(&full_path)
+            .context("Failed to create test file")?;
         let large_content = "X".repeat(2000); // ~500 tokens
-        file.write_all(large_content.as_bytes()).unwrap();
+        file.write_all(large_content.as_bytes())
+            .context("Failed to write test content")?;
 
         let mut pcb = PCB::new("HeavyProc".into(), 5, "Small task".into());
         pcb.memory_pointers
@@ -323,7 +328,7 @@ mod tests {
             .push(format!("file://{}", file_name));
 
         // Límite pequeño que no permite el archivo pero sí el resto
-        let context = vcm.assemble_context(&pcb, &swap, 100).await.unwrap();
+        let context = vcm.assemble_context(&pcb, &swap, 100).await?;
 
         // Limpiar
         let _ = std::fs::remove_file(&full_path);
@@ -334,10 +339,11 @@ mod tests {
         );
         assert!(!context.contains(&large_content));
         assert!(context.contains("Small task"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_vcm_l3_memory_injection() {
+    async fn test_vcm_l3_memory_injection() -> anyhow::Result<()> {
         let vcm = VirtualContextManager::new();
         let swap = LanceSwapManager::new("./test_users");
         // In a real test, we would add fragments to LanceDB.
@@ -346,24 +352,26 @@ mod tests {
         let mut pcb = PCB::new("SwapProc".into(), 5, "Check memory".into());
         pcb.memory_pointers.swap_refs.push("vec:0.1,0.2".into());
 
-        let context = vcm.assemble_context(&pcb, &swap, 1000).await.unwrap();
+        let context = vcm.assemble_context(&pcb, &swap, 1000).await?;
 
         // No debería fallar, aunque la lista esté vacía.
         assert!(context.contains("Check memory"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_vcm_dag_context_priority() {
+    async fn test_vcm_dag_context_priority() -> anyhow::Result<()> {
         let vcm = VirtualContextManager::new();
         let swap = LanceSwapManager::new("./test_users");
         let mut pcb = PCB::new("DAGProc".into(), 5, "Task".into());
         pcb.inlined_context
             .insert("parent_node".into(), "parent_output".into());
 
-        let context = vcm.assemble_context(&pcb, &swap, 1000).await.unwrap();
+        let context = vcm.assemble_context(&pcb, &swap, 1000).await?;
         assert!(context.contains("## DAG CONTEXT (DEPENDENCIES)"));
         assert!(context.contains("[Node: parent_node]"));
         assert!(context.contains("parent_output"));
+        Ok(())
     }
 
     #[test]

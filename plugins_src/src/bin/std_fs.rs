@@ -96,20 +96,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_safe_path_logic() {
+    fn test_safe_path_logic() -> anyhow::Result<()> {
         // En tests unitarios normales (no wasm), /workspace no existirá, 
         // pero validamos la construcción de la ruta.
-        let p = safe_path("docs/readme.txt").unwrap();
-        assert!(p.to_str().unwrap().contains("workspace"));
+        let p = safe_path("docs/readme.txt")?;
+        let p_str = p.to_str().context("Path is not valid UTF-8")?;
+        assert!(p_str.contains("workspace"));
+        Ok(())
     }
 
     #[test]
-    fn test_unknown_action() {
+    fn test_unknown_action() -> anyhow::Result<()> {
         let req = aegis_sdk::PluginRequest {
             action: "not_exists".to_string(),
             params: serde_json::Value::Null,
         };
-        let res = process_request(&req).unwrap();
+        let res = process_request(&req)?;
         assert_eq!(res.status, "error");
+        Ok(())
     }
 }

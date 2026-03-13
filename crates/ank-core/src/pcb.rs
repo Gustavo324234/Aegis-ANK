@@ -166,17 +166,18 @@ mod tests {
     }
 
     #[test]
-    fn test_pcb_serialization() {
+    fn test_pcb_serialization() -> anyhow::Result<()> {
         let pcb = PCB::new("SerializeTest".to_string(), 10, "prompt".to_string());
-        let json = pcb.to_json().expect("Failed to serialize");
+        let json = pcb.to_json().context("Failed to serialize")?;
 
-        let deserialized: PCB = PCB::from_json(&json).expect("Failed to deserialize");
+        let deserialized: PCB = PCB::from_json(&json).context("Failed to deserialize")?;
         assert_eq!(pcb.pid, deserialized.pid);
         assert_eq!(pcb.priority, deserialized.priority);
         assert_eq!(
             pcb.memory_pointers.l1_instruction,
             deserialized.memory_pointers.l1_instruction
         );
+        Ok(())
     }
 
     #[test]

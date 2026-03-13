@@ -397,7 +397,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_priority_scheduling() {
+    async fn test_priority_scheduling() -> anyhow::Result<()> {
         let mut scheduler = CognitiveScheduler::new(Arc::new(persistence::MockPersistor));
 
         let p10 = PCB::new("task-high".into(), 10, "mock".into());
@@ -407,34 +407,35 @@ mod tests {
         // Inyectamos fuera de orden
         scheduler
             .handle_event(SchedulerEvent::ScheduleTask(Box::new(p5a)))
-            .await
-            .unwrap();
+            .await?;
         scheduler
             .handle_event(SchedulerEvent::ScheduleTask(Box::new(p10)))
-            .await
-            .unwrap();
+            .await?;
         scheduler
             .handle_event(SchedulerEvent::ScheduleTask(Box::new(p5b)))
-            .await
-            .unwrap();
+            .await?;
 
         // Verificamos orden de salida
-        let first = scheduler.ready_queue.pop().unwrap();
+        let first = scheduler.ready_queue.pop()
+            .context("Ready queue should not be empty (first)")?;
         assert_eq!(
             first.process_name, "task-high",
             "Prioridad 10 debe salir primero"
         );
 
-        let second = scheduler.ready_queue.pop().unwrap();
+        let second = scheduler.ready_queue.pop()
+            .context("Ready queue should not be empty (second)")?;
         assert_eq!(
             second.process_name, "task-low-1",
             "FCFS para prioridad 5 (1)"
         );
 
-        let third = scheduler.ready_queue.pop().unwrap();
+        let third = scheduler.ready_queue.pop()
+            .context("Ready queue should not be empty (third)")?;
         assert_eq!(
             third.process_name, "task-low-2",
             "FCFS para prioridad 5 (2)"
         );
+        Ok(())
     }
 }

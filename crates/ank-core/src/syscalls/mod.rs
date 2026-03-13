@@ -244,11 +244,8 @@ impl StreamInterceptor {
             InterceptorResult::Continue
         } else {
             // Ya detectamos un trigger, buscamos el cierre ']'
-            if self.buffer.contains("]") {
-                // Intentamos parsear la syscall completa
-                if let Some(syscall) = parse_syscall(&self.buffer) {
-                    return InterceptorResult::SyscallReady(syscall);
-                }
+            if self.buffer.contains(']') && let Some(syscall) = parse_syscall(&self.buffer) {
+                return InterceptorResult::SyscallReady(syscall);
             }
             InterceptorResult::PossibleSyscall
         }

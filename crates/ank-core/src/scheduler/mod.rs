@@ -7,7 +7,7 @@ use crate::pcb::{ProcessState, PCB};
 use crate::scheduler::persistence::StatePersistor;
 use crate::swarm::client::SwarmClient;
 use crate::swarm::{NodeStatus, SwarmManager};
-use anyhow::{Context, Result};
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, HashMap};

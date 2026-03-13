@@ -93,9 +93,6 @@ impl VirtualContextManager {
             for swap_query in &pcb.memory_pointers.swap_refs {
                 let vector = if let Some(stripped) = swap_query.strip_prefix("vec:") {
                     stripped
-                        .split(',')
-                        .filter_map(|s| s.trim().parse::<f32>().ok())
-                        .collect::<Vec<f32>>()
                         .filter_map(|s| s.trim().parse::<f32>().ok())
                         .collect::<Vec<f32>>()
                 } else {
@@ -292,7 +289,6 @@ mod tests {
     use super::*;
     use crate::pcb::PCB;
     use std::io::Write;
-    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn test_assemble_basic_context() -> anyhow::Result<()> {

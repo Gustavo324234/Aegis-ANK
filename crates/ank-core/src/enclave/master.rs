@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Master Admin Enclave para gestionar superadministradores y mapeos de Tenant_ID a Puertos.
 /// Se persiste de manera segura con SQLCipher.

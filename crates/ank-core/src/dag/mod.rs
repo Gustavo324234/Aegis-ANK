@@ -1,6 +1,6 @@
 use crate::pcb::PCB;
 use crate::scheduler::ModelPreference;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -189,6 +189,7 @@ impl GraphManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[test]
     fn test_diamond_graph_parallel_execution() -> anyhow::Result<()> {

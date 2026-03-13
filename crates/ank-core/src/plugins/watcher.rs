@@ -1,5 +1,5 @@
 use crate::plugins::PluginManager;
-use notify::{RecursiveMode, Watcher};
+use notify::RecursiveMode;
 use notify_debouncer_mini::{new_debouncer, DebouncedEvent};
 use std::path::Path;
 use std::sync::Arc;

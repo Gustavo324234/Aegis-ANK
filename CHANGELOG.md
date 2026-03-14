@@ -1,8 +1,31 @@
 # Aegis Neural Kernel (ANK) - Changelog
 
-## [2.1.0] - Unreleased
+## [0.6.0] - Unreleased
 
 ### Added
+- **[ANK-911] Global Code Sanitization & Strict SRE Idioms:**
+  - **Purge of Imports**: Eliminated all unused imports across the `ank-core` crate, including legacy commented-out lines.
+  - **Strip Prefix Enforcement**: Replaced manual string indexing (e.g., `&line[N..]`) with `strip_prefix(...)` in `vcm/mod.rs` and `chal/drivers/cloud.rs` to ensure safety and prevent OOB Panics.
+  - **Dead Code Cleanup**: Removed unused fields (e.g., `tenant_id` in `TenantDB`) and applied `#[allow(dead_code)]` only where strictly required for gRPC compatibility.
+  - **Collapsible IF Refactor**: Optimized logic in `syscalls/mod.rs` by combining nested `if` statements into single predicates using `&&`.
+
+## [2.1.0] - Unreleased
+
+###🟩 DONE (Completado)
+- [ANK-917] Concurrent Regex Initialization Fix: Resolved race condition in global regex initialization by using idempotent `get_or_init` and removing `anyhow::Result` from the boot sequence [DONE]
+- [ANK-916] Syscall Test Payload Alignment (Final): Alignment of test payloads with strict StreamInterceptor protocol [ANK-916] `[DONE]`
+- [ANK-915] Syscall Test Payload Alignment: Sync test payloads with strict StreamInterceptor protocol (v0.6.3) `[DONE]`
+- [ANK-913] Test Suite Modernization: Comply with Ed25519 & Strict SRE Policies (v0.6.2) `[DONE]`
+- [ANK-912] THE AST RECONSTRUCTION: Scoping, Dalek v2 & Clippy Purge (v0.6.1) `[DONE]`
+### Added
+- **[ANK-910] Zero-Tolerance Clippy Purge & Manual Indexing Sanitization:**
+  - Implemented the `Strip Prefix` law: replaced all manual string indexing (e.g., `&uri[7..]`) with `strip_prefix("file://")` across `syscalls/mod.rs` and `vcm/mod.rs` to prevent index out of bounds.
+  - **Policy Zero-Panic Refactor**: Removed all `expect("FATAL")` calls in the `SyscallExecutor` regex engine.
+  - Implemented `init_syscall_regexes()` for safe, pre-validated regex compilation at system startup, returning `Result::Err` if patterns are invalid.
+  - **Architectural Conformity**: Implemented `impl Default` for `GraphManager`, `VirtualContextManager`, and `StreamInterceptor`, aligning with Clippy traits standards.
+  - **Char Optimization**: Replaced `push_str("\n")` with `push('\n')` in `vcm/mod.rs` for optimized memory allocation in the context assembly pipeline.
+  - **Global Cleanup**: Purged unused `anyhow::Result` and redundant imports in `compiler.rs` to clean up workspace lints.
+
 - **[ANK-901] SRE Firewall - CI Pull Request Guard:**
   - Implementación de `.github/workflows/pr_check.yml` para la auditoría automática de integridad en el repositorio del Kernel.
   - Configuración de "The Forge CI" con caché optimizada mediante `rust-cache` para reducir tiempos de build.
@@ -69,7 +92,7 @@
   - Implementación de `McpClientSession` siguiendo el Patrón Actor para la multiplexación asíncrona de mensajes JSON-RPC.
   - **Multiplexación de Promesas**: Uso de un diccionario de promesas con canales `oneshot` de Tokio indexados por UUIDs para correlacionar peticiones y respuestas concurrentes.
   - **Resiliencia Hardened**: Implementación obligatoria de timeouts de 30 segundos en todas las llamadas `call` para evitar bloqueos del S-DAG.
-  - **Notificación de Cierre**: Mecanismo de limpieza que notifica proactivamente a todas las peticiones pendientes (`ConnectionClosed`) si el transporte subyecente colapsa.
+  - **Notificación de Cierre**: Mecanismo de limpieza que notifica proactivamente a todas las peticiones pendientes (`ConnectionClosed`) si el transporte subyacente colapsa.
   - **Zero-Panic Architectural Design**: Gestión segura de canales y locks de concurrencia (`Arc<Mutex<HashMap>>`) evitando deadlocks y garantizando robustez industrial.
 
 ### Refactored
@@ -95,6 +118,33 @@
 - **[ANK-2002] Modularización de Dependencias Pesadas (Cargo Features):**
   - Transformado el Kernel en un modelo "Microkernel" activando bindings pesados de C++ (`llama-cpp-2`, `whisper-rs`, `webrtc-vad`) exclusivamente a través de los *features* `local_llm`, `local_voice` y `full_local`.
   - Aplicados mecanismos *Graceful Degradation* (Zero-Panic) para retornar estatus `unimplemented` en servicios gRPC nativos si los módulos locales no están incluidos en el *build*.
+
+### Fixed
+- **[ANK-903] Dockerfile Protoc Hotfix:**
+  - Inyección de `protobuf-compiler` en la etapa `builder` para solucionar fallos de compilación de `ank-proto`.
+  - Optimización de la capa mediante limpieza de caché de `apt`.
+
+- **[ANK-904] CI/CD Protoc Injection (SRE Firewall):**
+  - Actualización de `.github/workflows/pr_check.yml` para instalar `protobuf-compiler` en el runner de GitHub Actions.
+  - Garantizada la integridad del pipeline de auditoría automática ("The Forge").
+
+- **[ANK-905] Payload Enum Optimization (Clippy Fix):**
+  - Reducción de la huella de memoria del `enum Payload` generado por `prost` de 304 bytes a un tamaño óptimo mediante el uso de `boxed` fields.
+  - Modificación de `build.rs` en `ank-proto` para aplicar el atributo `#[prost(boxed)]` a la variante `status_update` (super::Pcb) del mensaje `TaskEvent`.
+  - Resolución del bloqueo de compilación causado por el lint `clippy::large_enum_variant` en entornos de auditoría estricta (SRE Firewall).
+
+- **[ANK-906] Clippy Refactor & Idiomatic Rust Fixes:**
+  - **`stdio.rs`**: Eliminado el import redundante de `StreamExt` en el top-level para cumplir con `unused_imports`.
+  - **`client.rs`**: Abstracción del tipo complejo del mapa de peticiones mediante el alias `PendingRequests`, mejorando la legibilidad arquitectónica.
+  - **`registry.rs`**: Implementación explícita del trait `Default` para `McpToolRegistry` siguiendo las recomendaciones de Clippy.
+  - **`sse.rs`**: Refactorización del parsing de eventos SSE utilizando `strip_prefix` para una gestión de strings más segura y performante.
+  - **Zero-Panic Consistency**: Auditoría de cambios garantizando la ausencia de `.unwrap()` y manteniendo la estabilidad del Ring 0.
+
+- **[ANK-908] Dependency Hell Resolution & Explicit Anyhow Imports:**
+  - **Explicit Imports**: Se ha inyectado `use anyhow::Context;` en todos los archivos del workspace que utilizan métodos de extensión de contexto, resolviendo fallos de resolución de tipos en el compilador.
+  - **Wasmtime v29 Alignment**: Refactorización del `PluginManager` para eliminar el uso de `wasmtime::Trap::UnreachableCode` (deprecado/removido en v29), reemplazándolo por capturas de traps genéricas y específicas compatibles con la nueva API.
+  - **CI Robustness**: Verificación de la instalación de `protobuf-compiler` en el pipeline de GitHub Actions para garantizar la disponibilidad de `protoc`.
+  - **Crate Versioning**: Incremento de versiones a `ank-core v0.5.2` y `ank-proto v0.1.4` reflejando los cambios estructurales de dependencias.
 
 ## [1.5.1] - Unreleased
 
@@ -302,6 +352,8 @@
     - **SRE Fallback (Resilience)**: Implemented automatic recovery where failed teleportations are re-queued locally, ensuring zero task loss.
     - **Context Inlining**: Added `inlined_context` support to PCB to bundle local files and dependencies before migration.
 
+- **[ANK-913]** Test Suite Modernization: Comply with Ed25519 & Strict SRE Policies (v0.6.2) `[DONE]`
+- **[ANK-912]** THE AST RECONSTRUCTION: Scoping, Dalek v2 & Clippy Purge (v0.6.1) `[DONE]`
 ## [0.7.0] - 2026-02-28
 ### Added
 - **[ANK-400] Neural Swarm Discovery (mDNS/Zeroconf)**:

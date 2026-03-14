@@ -1,9 +1,11 @@
+use crate::auth::citadel::{generate_public_tenant_id, sanitize_error, SafeIdentity};
 use ank_core::{enclave::master::MasterEnclave, SchedulerEvent, PCB as CorePCB};
 use ank_proto::v1::kernel_service_server::KernelService;
 use ank_proto::v1::{
-    AdminSetupRequest, AdminSetupResponse, Empty, PasswordResetRequest, EngineConfigRequest, Priority as ProtoPriority,
-    ProcessList, SystemState, SystemStatus, TaskEvent, TaskRequest, TaskResponse,
-    TaskSubscription, TenantCreateRequest, TenantCreateResponse, Pcb as ProtoPcb, ProcessState as ProtoProcessState,
+    AdminSetupRequest, AdminSetupResponse, Empty, EngineConfigRequest, Pcb as ProtoPcb,
+    Priority as ProtoPriority, ProcessList, ProcessState as ProtoProcessState, SystemState,
+    SystemStatus, TaskEvent, TaskRequest, TaskResponse, TaskSubscription, TenantCreateRequest,
+    TenantCreateResponse,
 };
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -13,7 +15,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
 use tracing::{info, warn};
-use crate::auth::citadel::{generate_public_tenant_id, SafeIdentity, sanitize_error};
 
 #[derive(Clone)]
 pub struct CitadelAuth {
@@ -36,6 +37,7 @@ impl std::fmt::Debug for CitadelAuth {
 /// Extrae la identidad del Tenant pero NO bloquea si faltan headers,
 /// delegando la decisión de seguridad a cada RPC individualmente. Esto es CRÍTICO
 /// para que GetSystemStatus pueda responder 0 (Initializing) a una Shell sin sesión.
+#[allow(clippy::result_large_err)]
 pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
     let metadata = req.metadata();
 
@@ -64,7 +66,7 @@ pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
         .map_err(|e| Status::internal(format!("Aegis Identity Error: {}", e)))?;
 
     let mut req = req;
-    
+
     // Inyectar SafeIdentity solicitado en el ticket
     req.extensions_mut().insert(SafeIdentity {
         private_id: tenant_id.clone(),
@@ -116,15 +118,29 @@ impl AnkRpcServer {
     }
 
     async fn validate_auth(&self, auth: &CitadelAuth) -> Result<(), Status> {
-        if let Ok(is_master) = self.master_enclave.authenticate_master(&auth.tenant_id, &auth.session_key).await {
-            if is_master { return Ok(()); }
+        if let Ok(is_master) = self
+            .master_enclave
+            .authenticate_master(&auth.tenant_id, &auth.session_key)
+            .await
+        {
+            if is_master {
+                return Ok(());
+            }
         }
-        
-        if let Ok(is_tenant) = self.master_enclave.authenticate_tenant(&auth.tenant_id, &auth.session_key).await {
-            if is_tenant { return Ok(()); }
+
+        if let Ok(is_tenant) = self
+            .master_enclave
+            .authenticate_tenant(&auth.tenant_id, &auth.session_key)
+            .await
+        {
+            if is_tenant {
+                return Ok(());
+            }
         }
-        
-        Err(Status::unauthenticated("Citadel AUTH_FAILURE: Access Denied."))
+
+        Err(Status::unauthenticated(
+            "Citadel AUTH_FAILURE: Access Denied.",
+        ))
     }
 }
 
@@ -221,24 +237,30 @@ impl KernelService for AnkRpcServer {
     ) -> Result<Response<SystemStatus>, Status> {
         // Determinar estado basado en si el Master Admin está inicializado.
         // Si hay error en la DB (ej. borrada), asumimos false para permitir redirección al Setup.
-        let is_init = self.master_enclave.is_initialized().await.unwrap_or_else(|e| {
-            warn!("MasterEnclave check failed, reporting uninitialized: {}", e);
-            false
-        });
+        let is_init = self
+            .master_enclave
+            .is_initialized()
+            .await
+            .unwrap_or_else(|e| {
+                warn!("MasterEnclave check failed, reporting uninitialized: {}", e);
+                false
+            });
 
         // Validación de contexto solo si el sistema se reporta operativo.
         let auth = request.extensions().get::<CitadelAuth>();
-        
+
         if is_init && auth.is_none() {
-            return Err(Status::unauthenticated("Citadel Protocol context missing (System is Operational)"));
+            return Err(Status::unauthenticated(
+                "Citadel Protocol context missing (System is Operational)",
+            ));
         }
-        
+
         if is_init {
             if let Some(a) = auth {
                 self.validate_auth(a).await?;
             }
         }
-        
+
         // Reportamos explícitamente el valor acorde al enum (0: Initializing, 1: Operational)
         let state = if is_init {
             SystemState::StateOperational as i32
@@ -270,8 +292,15 @@ impl KernelService for AnkRpcServer {
             .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
 
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        if let Err(e) = self.scheduler_tx.send(SchedulerEvent::ListProcesses(reply_tx)).await {
-            return Err(Status::internal(format!("Failed to reach scheduler: {}", e)));
+        if let Err(e) = self
+            .scheduler_tx
+            .send(SchedulerEvent::ListProcesses(reply_tx))
+            .await
+        {
+            return Err(Status::internal(format!(
+                "Failed to reach scheduler: {}",
+                e
+            )));
         }
 
         let core_processes = reply_rx
@@ -376,7 +405,9 @@ impl KernelService for AnkRpcServer {
         }
 
         let stream = ReceiverStream::new(rx).map(Ok);
-        Ok(Response::new(Box::pin(stream) as Self::TeleportProcessStream))
+        Ok(Response::new(
+            Box::pin(stream) as Self::TeleportProcessStream
+        ))
     }
 
     async fn initialize_master_admin(
@@ -385,7 +416,11 @@ impl KernelService for AnkRpcServer {
     ) -> Result<Response<AdminSetupResponse>, Status> {
         let req = request.into_inner();
 
-        match self.master_enclave.initialize_master(&req.username, &req.passphrase).await {
+        match self
+            .master_enclave
+            .initialize_master(&req.username, &req.passphrase)
+            .await
+        {
             Ok(_) => Ok(Response::new(AdminSetupResponse {
                 success: true,
                 message: "Master Admin successfully initialized".to_string(),
@@ -407,15 +442,18 @@ impl KernelService for AnkRpcServer {
         let req = request.into_inner();
 
         // Validar que la request venga del root
-        let is_authed = self.master_enclave
+        let is_authed = self
+            .master_enclave
             .authenticate_master(&auth.tenant_id, &auth.session_key)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
         if !is_authed {
-            return Err(Status::permission_denied("Only Master Admin can create tenants"));
+            return Err(Status::permission_denied(
+                "Only Master Admin can create tenants",
+            ));
         }
-        
+
         match self.master_enclave.create_tenant(&req.username).await {
             Ok((port, pass)) => Ok(Response::new(TenantCreateResponse {
                 success: true,
@@ -426,39 +464,6 @@ impl KernelService for AnkRpcServer {
             })),
             Err(e) => Err(Status::internal(format!("Failed to create tenant: {}", e))),
         }
-    }
-
-    async fn reset_tenant_password(
-        &self,
-        request: Request<PasswordResetRequest>,
-    ) -> Result<Response<Empty>, Status> {
-        let auth = request
-            .extensions()
-            .get::<CitadelAuth>()
-            .cloned() // Clonamos inmediatamente para desligar de la vida de request
-            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
-
-        let req = request.into_inner();
-
-        // Validar que sea un Master Admin autorizado o el propio usuario reseteando su password?
-        // En Citadel, normalmente un Master Admin o un servicio de recu puede forzarlo.
-        let is_master = self.master_enclave
-            .authenticate_master(&auth.tenant_id, &auth.session_key)
-            .await
-            .unwrap_or(false);
-
-        // Para simplificar, requerimos Master o que el propio usuario provea auth validado del tenant.
-        // Asumimos root por ahora.
-        if !is_master && auth.tenant_id != req.tenant_id {
-            return Err(Status::permission_denied("No permission to reset this tenant password"));
-        }
-
-        self.master_enclave
-            .reset_tenant_password(&req.tenant_id, &req.new_passphrase)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        Ok(Response::new(Empty {}))
     }
 
     async fn configure_engine(
@@ -480,19 +485,22 @@ impl KernelService for AnkRpcServer {
                 Status::internal(format!("Failed to open tenant DB: {}", safe_msg))
             })?;
 
-        tenant_db.set_kv("engine_api_url", &req.api_url)
+        tenant_db
+            .set_kv("engine_api_url", &req.api_url)
             .map_err(|e| {
                 let safe_msg = sanitize_error(&e.to_string(), &auth.tenant_id, &auth.public_id);
                 Status::internal(safe_msg)
             })?;
-            
-        tenant_db.set_kv("engine_model", &req.model_name)
+
+        tenant_db
+            .set_kv("engine_model", &req.model_name)
             .map_err(|e| {
                 let safe_msg = sanitize_error(&e.to_string(), &auth.tenant_id, &auth.public_id);
                 Status::internal(safe_msg)
             })?;
-            
-        tenant_db.set_kv("engine_api_key", &req.api_key)
+
+        tenant_db
+            .set_kv("engine_api_key", &req.api_key)
             .map_err(|e| {
                 let safe_msg = sanitize_error(&e.to_string(), &auth.tenant_id, &auth.public_id);
                 Status::internal(safe_msg)
@@ -504,7 +512,10 @@ impl KernelService for AnkRpcServer {
             hal.update_cloud_credentials(req.api_url, req.model_name, req.api_key);
         }
 
-        info!("Engine correctly configured for public_tenant {}", auth.public_id);
+        info!(
+            "Engine correctly configured for public_tenant {}",
+            auth.public_id
+        );
 
         Ok(Response::new(Empty {}))
     }

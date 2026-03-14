@@ -14,9 +14,9 @@ pub mod vcm;
 pub use chal::{CognitiveHAL, InferenceDriver, SystemError};
 pub use chronos::ChronosDaemon;
 pub use dag::{DagNode, DagNodeStatus, ExecutionGraph, GraphManager, NodeResult};
-pub use enclave::TenantDB;
+pub use enclave::{MasterEnclave, TenantDB};
 pub use pcb::{ProcessState, PCB};
-pub use scheduler::persistence::{StatePersistor, SQLCipherPersistor};
+pub use scheduler::persistence::{SQLCipherPersistor, StatePersistor};
 pub use scheduler::{CognitiveScheduler, SchedulerEvent, SharedScheduler};
 pub use swarm::SwarmManager;
 pub use syscalls::{parse_syscall, Syscall}; // Added re-export for SwarmManager

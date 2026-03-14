@@ -35,30 +35,35 @@ fn process_request(request: &PluginRequest) -> Result<PluginResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[test]
-    fn test_process_get_time() {
+    fn test_process_get_time() -> anyhow::Result<()> {
         let req = PluginRequest {
             action: "get_time".to_string(),
             params: serde_json::Value::Null,
         };
-        let result = process_request(&req).expect("Debería procesar de forma segura");
+        let result = process_request(&req)?;
         assert_eq!(result.status, "success");
         assert!(result.data.is_some());
         
         // Verificamos que sea una fecha válida (formato ISO 8601 que usa chrono por defecto en Serde)
-        let date_str = result.data.unwrap().as_str().unwrap().to_string();
+        let data = result.data.context("data should be present")?;
+        let date_str = data.as_str().context("data should be a string")?.to_string();
         assert!(date_str.contains("Z")); // UTC
+        Ok(())
     }
 
     #[test]
-    fn test_unknown_action() {
+    fn test_unknown_action() -> anyhow::Result<()> {
         let req = PluginRequest {
             action: "unknown_cmd".to_string(),
             params: serde_json::Value::Null,
         };
-        let result = process_request(&req).expect("Debería retornar un PluginResponse de error");
+        let result = process_request(&req)?;
         assert_eq!(result.status, "error");
-        assert!(result.error.unwrap().contains("Acción desconocida"));
+        let err_msg = result.error.context("error should be present")?;
+        assert!(err_msg.contains("Acción desconocida"));
+        Ok(())
     }
 }

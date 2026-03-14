@@ -75,7 +75,11 @@ impl tonic::service::Interceptor for CitadelInterceptor {
 
 type AegisClient = KernelServiceClient<InterceptedService<Channel, CitadelInterceptor>>;
 
-async fn create_client(server_url: &str, tenant: Option<String>, key: Option<String>) -> Result<AegisClient> {
+async fn create_client(
+    server_url: &str,
+    tenant: Option<String>,
+    key: Option<String>,
+) -> Result<AegisClient> {
     let channel = Channel::from_shared(server_url.to_string())?
         .connect()
         .await
@@ -106,51 +110,57 @@ async fn main() -> Result<()> {
     };
 
     match cli.command {
-        Commands::Status => {
-            match client.get_system_status(Request::new(Empty {})).await {
-                Ok(resp) => {
-                    let status = resp.into_inner();
-                    println!("========== AEGIS SYSTEM STATUS ==========");
-                    let state_str = if status.state == 0 { "INITIALIZING" } else { "OPERATIONAL" };
-                    println!("State          : {}", state_str);
-                    println!("CPU Load       : {:.2}%", status.cpu_load * 100.0);
-                    println!("VRAM Allocated : {:.2} MB", status.vram_allocated_mb);
-                    println!("VRAM Total     : {:.2} MB", status.vram_total_mb);
-                    println!("Processes      : {}", status.total_processes);
-                    println!("Workers        : {}", status.active_workers);
-                    println!("Uptime         : {}", status.uptime);
-                    println!("Loaded Models  : {:?}", status.loaded_models);
-                    println!("=========================================");
-                }
-                Err(e) => handle_grpc_err(e),
+        Commands::Status => match client.get_system_status(Request::new(Empty {})).await {
+            Ok(resp) => {
+                let status = resp.into_inner();
+                println!("========== AEGIS SYSTEM STATUS ==========");
+                let state_str = if status.state == 0 {
+                    "INITIALIZING"
+                } else {
+                    "OPERATIONAL"
+                };
+                println!("State          : {}", state_str);
+                println!("CPU Load       : {:.2}%", status.cpu_load * 100.0);
+                println!("VRAM Allocated : {:.2} MB", status.vram_allocated_mb);
+                println!("VRAM Total     : {:.2} MB", status.vram_total_mb);
+                println!("Processes      : {}", status.total_processes);
+                println!("Workers        : {}", status.active_workers);
+                println!("Uptime         : {}", status.uptime);
+                println!("Loaded Models  : {:?}", status.loaded_models);
+                println!("=========================================");
             }
-        }
-        Commands::Ps => {
-            match client.list_processes(Request::new(Empty {})).await {
-                Ok(resp) => {
-                    let list = resp.into_inner();
-                    if list.processes.is_empty() {
-                        println!("No active processes.");
-                    } else {
-                        println!("{:<15} | {:<15} | {:<20} | {:<10}", "PID", "STATE", "NAME", "PRIO");
-                        println!("{:-<15}-+-{:-<15}-+-{:-<20}-+-{:-<10}", "", "", "", "");
-                        for pcb in list.processes {
-                            let state_name = match pcb.state {
-                                0 => "PENDING",
-                                1 => "RUNNING",
-                                2 => "BLOCKED",
-                                3 => "SUSPENDED",
-                                4 => "COMPLETED",
-                                5 => "TERMINATED",
-                                _ => "UNKNOWN",
-                            };
-                            println!("{:<15} | {:<15} | {:<20} | {:<10}", pcb.pid, state_name, pcb.process_name, pcb.priority);
-                        }
+            Err(e) => handle_grpc_err(e),
+        },
+        Commands::Ps => match client.list_processes(Request::new(Empty {})).await {
+            Ok(resp) => {
+                let list = resp.into_inner();
+                if list.processes.is_empty() {
+                    println!("No active processes.");
+                } else {
+                    println!(
+                        "{:<15} | {:<15} | {:<20} | {:<10}",
+                        "PID", "STATE", "NAME", "PRIO"
+                    );
+                    println!("{:-<15}-+-{:-<15}-+-{:-<20}-+-{:-<10}", "", "", "", "");
+                    for pcb in list.processes {
+                        let state_name = match pcb.state {
+                            0 => "PENDING",
+                            1 => "RUNNING",
+                            2 => "BLOCKED",
+                            3 => "SUSPENDED",
+                            4 => "COMPLETED",
+                            5 => "TERMINATED",
+                            _ => "UNKNOWN",
+                        };
+                        println!(
+                            "{:<15} | {:<15} | {:<20} | {:<10}",
+                            pcb.pid, state_name, pcb.process_name, pcb.priority
+                        );
                     }
                 }
-                Err(e) => handle_grpc_err(e),
             }
-        }
+            Err(e) => handle_grpc_err(e),
+        },
         Commands::Run { prompt } => {
             // Task Submission
             let task_req = TaskRequest {
@@ -186,7 +196,7 @@ async fn main() -> Result<()> {
 
             // Hook for graceful ctrl-c
             tokio::spawn(async move {
-                if let Ok(_) = tokio::signal::ctrl_c().await {
+                if tokio::signal::ctrl_c().await.is_ok() {
                     println!("\n[SRE Guard] Stream cancelled by user (Ctrl+C). Exiting cleanly.");
                     process::exit(0);
                 }
@@ -212,7 +222,8 @@ async fn main() -> Result<()> {
                                     break;
                                 }
                                 ank_proto::v1::task_event::Payload::StatusUpdate(pcb) => {
-                                    if pcb.state == 4 || pcb.state == 5 { // Completed or Terminated
+                                    if pcb.state == 4 || pcb.state == 5 {
+                                        // Completed or Terminated
                                         break;
                                     }
                                 }

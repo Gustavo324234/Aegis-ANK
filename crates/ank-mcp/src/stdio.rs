@@ -1,7 +1,8 @@
 use crate::transport::{JsonRpcMessage, McpTransport};
-use anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
 use async_trait::async_trait;
-use futures_util::{Stream, StreamExt};
+use futures_util::Stream;
 use serde_json;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,22 +42,27 @@ impl StdioTransport {
         );
 
         let mut cmd = Command::new(command);
-        
+
         // Protocolo Citadel: Zero-Trust Isolation (Regla 1)
         cmd.args(args)
             .env_clear() // El subproceso nace ciego. No hereda la AEGIS_ROOT_KEY.
-            .envs(envs)  // Inyección explícita de secretos necesarios.
+            .envs(envs) // Inyección explícita de secretos necesarios.
             .current_dir(cwd) // Jailing a nivel de directorio de trabajo.
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit()); // Permitimos ver errores del servidor en el log del kernel.
 
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .with_context(|| format!("Error fatal al spawnear servidor MCP: {}", command))?;
 
-        let stdin = child.stdin.take()
+        let stdin = child
+            .stdin
+            .take()
             .context("Error de hardware: No se pudo capturar STDIN del proceso hijo")?;
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .context("Error de hardware: No se pudo capturar STDOUT del proceso hijo")?;
 
         Ok(Self {
@@ -71,16 +77,17 @@ impl StdioTransport {
 impl McpTransport for StdioTransport {
     /// Serializa el mensaje, añade el delimitador \n y lo envía al stdin del hijo. (Regla 2)
     async fn send_message(&self, msg: JsonRpcMessage) -> Result<()> {
-        let mut json = serde_json::to_string(&msg)
-            .context("Error de serialización MCP")?;
+        let mut json = serde_json::to_string(&msg).context("Error de serialización MCP")?;
         json.push('\n');
 
         let mut stdin = self.stdin.lock().await;
-        stdin.write_all(json.as_bytes())
+        stdin
+            .write_all(json.as_bytes())
             .await
             .context("Error IO: Broken Pipe al escribir en STDIN del servidor MCP")?;
-        
-        stdin.flush()
+
+        stdin
+            .flush()
             .await
             .context("Error IO: Fallo al vaciar el buffer de STDIN")?;
 
@@ -94,7 +101,7 @@ impl McpTransport for StdioTransport {
         let stream = async_stream::try_stream! {
             let stdout = stdout_mutex.lock().await.take()
                 .context("Error de estado: El flujo de STDOUT ya ha sido reclamado")?;
-            
+
             let mut reader = BufReader::new(stdout).lines();
 
             while let Some(line) = reader.next_line().await.context("Error de lectura en STDOUT")? {
@@ -139,6 +146,7 @@ impl Drop for StdioTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::StreamExt;
     use std::env;
 
     #[tokio::test]
@@ -146,7 +154,14 @@ mod tests {
         // Usamos una utilidad de sistema que haga echo de la entrada.
         // En Windows usamos powershell, en Unix/Docker 'cat'.
         let (cmd, args) = if cfg!(windows) {
-            ("python", vec!["-u".into(), "-c".into(), "import sys; [print(line.strip(), flush=True) for line in sys.stdin]".into()])
+            (
+                "python",
+                vec![
+                    "-u".into(),
+                    "-c".into(),
+                    "import sys; [print(line.strip(), flush=True) for line in sys.stdin]".into(),
+                ],
+            )
         } else {
             ("cat", vec![])
         };
@@ -163,7 +178,7 @@ mod tests {
 
         // Escuchamos en una tarea separada
         let mut stream = transport.receive_messages();
-        
+
         // Enviamos
         transport.send_message(req.clone()).await?;
 
@@ -174,10 +189,10 @@ mod tests {
                 assert_eq!(id, serde_json::json!(42));
                 assert_eq!(method, "ping");
             } else {
-                panic!("Tipo de mensaje recibido incorrecto: {:?}", msg);
+                anyhow::bail!("Tipo de mensaje recibido incorrecto: {:?}", msg);
             }
         } else {
-            panic!("Stream cerrado prematuramente");
+            anyhow::bail!("Stream cerrado prematuramente");
         }
 
         Ok(())

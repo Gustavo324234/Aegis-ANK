@@ -79,7 +79,7 @@ impl LanceSwapManager {
     ) -> Result<String, SwapError> {
         let _db_path = self.compute_db_path(tenant_id);
         let id = Uuid::new_v4().to_string();
-        
+
         // Actualizamos la dimensión si es la primera vez
         if self.dimension.load(Ordering::SeqCst) == 0 {
             self.dimension.store(vector.len(), Ordering::SeqCst);
@@ -120,7 +120,6 @@ impl LanceSwapManager {
 }
 
 /// --- QUANTIZATION UTILS ---
-
 /// Cuantiza un vector f32 a i8 (Symmetric Min/Max Scaling).
 /// Devuelve el vector comprimido, el valor mínimo y el máximo.
 pub fn quantize_f32_to_i8(vector: &[f32]) -> (Vec<i8>, f32, f32) {
@@ -132,8 +131,12 @@ pub fn quantize_f32_to_i8(vector: &[f32]) -> (Vec<i8>, f32, f32) {
     let mut max = vector[0];
 
     for &val in vector {
-        if val < min { min = val; }
-        if val > max { max = val; }
+        if val < min {
+            min = val;
+        }
+        if val > max {
+            max = val;
+        }
     }
 
     // Zero-Panic Math: Prevenir división por cero
@@ -142,9 +145,10 @@ pub fn quantize_f32_to_i8(vector: &[f32]) -> (Vec<i8>, f32, f32) {
     }
 
     let scale = (max - min) / 255.0;
-    
+
     // Mapeamos [min, max] a [0, 255] y luego desplazamos a [-128, 127]
-    let quantized = vector.iter()
+    let quantized = vector
+        .iter()
         .map(|&val| {
             let normalized = (val - min) / scale;
             (normalized - 128.0).round() as i8
@@ -161,10 +165,9 @@ pub fn dequantize_i8_to_f32(vector: &[i8], min: f32, max: f32) -> Vec<f32> {
     }
 
     let scale = (max - min) / 255.0;
-    vector.iter()
-        .map(|&val| {
-            (val as f32 + 128.0) * scale + min
-        })
+    vector
+        .iter()
+        .map(|&val| (val as f32 + 128.0) * scale + min)
         .collect()
 }
 
@@ -176,11 +179,11 @@ mod tests {
     fn test_quantization_roundtrip() {
         let original = vec![0.1, -0.5, 1.0, 0.0, 0.85];
         let (q_vec, min, max) = quantize_f32_to_i8(&original);
-        
+
         assert_eq!(q_vec.len(), original.len());
-        
+
         let restored = dequantize_i8_to_f32(&q_vec, min, max);
-        
+
         for i in 0..original.len() {
             // Permitimos un pequeño error de cuantización (~1/255)
             assert!((original[i] - restored[i]).abs() < 0.02);
@@ -191,7 +194,7 @@ mod tests {
     fn test_zero_division_guard() {
         let original = vec![0.5, 0.5, 0.5];
         let (q_vec, min, max) = quantize_f32_to_i8(&original);
-        
+
         assert_eq!(q_vec, vec![0, 0, 0]);
         let restored = dequantize_i8_to_f32(&q_vec, min, max);
         assert_eq!(restored, original);

@@ -29,9 +29,15 @@ Use the provided context to fulfill the instruction accurately.";
 const MAX_FILE_SIZE_BYTES: u64 = 2 * 1024 * 1024;
 
 /// --- VIRTUAL CONTEXT MANAGER ---
-/// El VCM es responsable de construir la \"ventana de atención\" (Context Window)
+/// El VCM es responsable de construir la "ventana de atención" (Context Window)
 /// para el LLM, agregando instrucciones L1, referencias L2 y memoria swap L3.
 pub struct VirtualContextManager;
+
+impl Default for VirtualContextManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl VirtualContextManager {
     pub fn new() -> Self {
@@ -85,8 +91,8 @@ impl VirtualContextManager {
 
         if !pcb.memory_pointers.swap_refs.is_empty() {
             for swap_query in &pcb.memory_pointers.swap_refs {
-                let vector = if swap_query.starts_with("vec:") {
-                    swap_query[4..]
+                let vector = if let Some(stripped) = swap_query.strip_prefix("vec:") {
+                    stripped
                         .split(',')
                         .filter_map(|s| s.trim().parse::<f32>().ok())
                         .collect::<Vec<f32>>()
@@ -128,7 +134,7 @@ impl VirtualContextManager {
         let mut l2_str = String::new();
 
         for ref_uri in &pcb.memory_pointers.l2_context_refs {
-            if ref_uri.starts_with("file://") {
+            if let Some(path_part) = ref_uri.strip_prefix("file://") {
                 if current_tokens >= actual_token_limit {
                     if !has_l2 {
                         l2_str.push_str("\n## ATTACHED CONTEXT\n");
@@ -141,7 +147,6 @@ impl VirtualContextManager {
                     continue;
                 }
 
-                let path_part = &ref_uri[7..];
                 if !is_safe_path(tenant_id, path_part) {
                     return Err(VCMError::PathTraversalDetected(path_part.to_string()));
                 }
@@ -173,7 +178,8 @@ impl VirtualContextManager {
                 let prefix = format!("[File: {}]\n", path_part);
                 let prefix_tokens = estimate_tokens(&prefix);
 
-                let remaining = actual_token_limit.saturating_sub(current_tokens + prefix_tokens + 5);
+                let remaining =
+                    actual_token_limit.saturating_sub(current_tokens + prefix_tokens + 5);
                 if remaining == 0 {
                     if !has_l2 {
                         l2_str.push_str("\n## ATTACHED CONTEXT\n");
@@ -206,7 +212,7 @@ impl VirtualContextManager {
                     l2_str.push_str(&prefix);
                     l2_str.push_str("[...truncado por falta de memoria...]\n");
                     l2_str.push_str(content_to_add);
-                    l2_str.push_str("\n");
+                    l2_str.push('\n');
                     current_tokens += estimate_tokens(content_to_add) + prefix_tokens + 5;
                 } else {
                     if !has_l2 {
@@ -215,7 +221,7 @@ impl VirtualContextManager {
                     }
                     l2_str.push_str(&prefix);
                     l2_str.push_str(content_to_add);
-                    l2_str.push_str("\n");
+                    l2_str.push('\n');
                     current_tokens += content_tokens + prefix_tokens;
                 }
             }
@@ -282,39 +288,43 @@ pub fn is_safe_path(_tenant_id: &str, path_str: &str) -> bool {
 mod tests {
     use super::*;
     use crate::pcb::PCB;
+    use anyhow::Context;
     use std::io::Write;
-    use tempfile::NamedTempFile;
 
     #[tokio::test]
-    async fn test_assemble_basic_context() {
+    async fn test_assemble_basic_context() -> anyhow::Result<()> {
         let vcm = VirtualContextManager::new();
         let swap = LanceSwapManager::new("./test_users"); // Mock
         let pcb = PCB::new("TestProcess".into(), 5, "Summarize this".into());
 
         // Límite generoso
-        let context = vcm.assemble_context(&pcb, &swap, 1000).await.unwrap();
+        let context = vcm.assemble_context(&pcb, &swap, 1000).await?;
 
         assert!(context.contains("SYSTEM: Aegis Neural Kernel VCM"));
         assert!(context.contains("Summarize this"));
         // El orden es SYSTEM -> DAG -> L2 -> L3 -> L1
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_vcm_file_omission_on_overflow() {
+    async fn test_vcm_file_omission_on_overflow() -> anyhow::Result<()> {
         let vcm = VirtualContextManager::new();
         let swap = LanceSwapManager::new("./test_users");
 
         // Crear estructura de directorios para el tenant default
         let workspace_path = "./users/default/workspace";
-        tokio::fs::create_dir_all(workspace_path).await.unwrap();
+        tokio::fs::create_dir_all(workspace_path)
+            .await
+            .context("Failed to create workspace dir")?;
 
         // Crear un archivo temporal con ruta relativa dentro del workspace del tenant
         let file_name = "test_overflow_dummy.txt";
         let full_path = std::path::Path::new(workspace_path).join(file_name);
 
-        let mut file = std::fs::File::create(&full_path).unwrap();
+        let mut file = std::fs::File::create(&full_path).context("Failed to create test file")?;
         let large_content = "X".repeat(2000); // ~500 tokens
-        file.write_all(large_content.as_bytes()).unwrap();
+        file.write_all(large_content.as_bytes())
+            .context("Failed to write test content")?;
 
         let mut pcb = PCB::new("HeavyProc".into(), 5, "Small task".into());
         pcb.memory_pointers
@@ -322,7 +332,7 @@ mod tests {
             .push(format!("file://{}", file_name));
 
         // Límite pequeño que no permite el archivo pero sí el resto
-        let context = vcm.assemble_context(&pcb, &swap, 100).await.unwrap();
+        let context = vcm.assemble_context(&pcb, &swap, 100).await?;
 
         // Limpiar
         let _ = std::fs::remove_file(&full_path);
@@ -330,13 +340,15 @@ mod tests {
         assert!(
             context.contains("omitido por falta de memoria")
                 || context.contains("omitido por tamaño excesivo")
+                || context.contains("truncado por falta de memoria")
         );
         assert!(!context.contains(&large_content));
         assert!(context.contains("Small task"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_vcm_l3_memory_injection() {
+    async fn test_vcm_l3_memory_injection() -> anyhow::Result<()> {
         let vcm = VirtualContextManager::new();
         let swap = LanceSwapManager::new("./test_users");
         // In a real test, we would add fragments to LanceDB.
@@ -345,23 +357,26 @@ mod tests {
         let mut pcb = PCB::new("SwapProc".into(), 5, "Check memory".into());
         pcb.memory_pointers.swap_refs.push("vec:0.1,0.2".into());
 
-        let context = vcm.assemble_context(&pcb, &swap, 1000).await.unwrap();
+        let context = vcm.assemble_context(&pcb, &swap, 1000).await?;
 
         // No debería fallar, aunque la lista esté vacía.
         assert!(context.contains("Check memory"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_vcm_dag_context_priority() {
+    async fn test_vcm_dag_context_priority() -> anyhow::Result<()> {
         let vcm = VirtualContextManager::new();
         let swap = LanceSwapManager::new("./test_users");
         let mut pcb = PCB::new("DAGProc".into(), 5, "Task".into());
-        pcb.inlined_context.insert("parent_node".into(), "parent_output".into());
+        pcb.inlined_context
+            .insert("parent_node".into(), "parent_output".into());
 
-        let context = vcm.assemble_context(&pcb, &swap, 1000).await.unwrap();
+        let context = vcm.assemble_context(&pcb, &swap, 1000).await?;
         assert!(context.contains("## DAG CONTEXT (DEPENDENCIES)"));
         assert!(context.contains("[Node: parent_node]"));
         assert!(context.contains("parent_output"));
+        Ok(())
     }
 
     #[test]

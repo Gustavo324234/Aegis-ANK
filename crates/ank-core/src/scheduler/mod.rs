@@ -2,12 +2,11 @@ pub mod compiler;
 pub mod graph;
 pub mod persistence;
 
-use crate::dag::{DagNodeStatus, GraphManager, NodeResult, ExecutionGraph};
+use crate::dag::{DagNodeStatus, ExecutionGraph, GraphManager, NodeResult};
 use crate::pcb::{ProcessState, PCB};
 use crate::scheduler::persistence::StatePersistor;
 use crate::swarm::client::SwarmClient;
 use crate::swarm::{NodeStatus, SwarmManager};
-use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, HashMap};
@@ -49,7 +48,7 @@ pub enum SchedulerEvent {
     DispatchLocal(Box<PCB>), // Nuevo: Re-encolado forzado para ejecución local
     SyscallCompleted { pid: String, result: String },
     RemoteEvent(String, ank_proto::v1::TaskEvent), // Nuevo: Evento interceptado de un nodo remoto
-    RegisterGraph(Box<ExecutionGraph>), // Nuevo: Registro y validación de un S-DAG
+    RegisterGraph(Box<ExecutionGraph>),            // Nuevo: Registro y validación de un S-DAG
     ProcessCompleted { pid: String, output: String },
     PreemptCurrent,
     TerminateProcess(String),
@@ -106,11 +105,13 @@ impl CognitiveScheduler {
             tokio::select! {
                 // Prioridad 1: Procesar eventos externos
                 Some(event) = event_rx.recv() => {
+                    use anyhow::Context;
                     self.handle_event(event).await.context("Error handling scheduler event")?;
                 }
 
                 // Prioridad 2: Ciclo de despacho (Reconcile)
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    use anyhow::Context;
                     self.reconcile().await.context("Error during state reconciliation")?;
                 }
 
@@ -130,15 +131,19 @@ impl CognitiveScheduler {
 
     #[instrument(skip(self), name = "ANK_Handle_Event")]
     async fn handle_event(&mut self, event: SchedulerEvent) -> anyhow::Result<()> {
+        use anyhow::Context;
         self.last_activity = Utc::now();
         match event {
             SchedulerEvent::ScheduleTask(pcb_box) => {
                 info!(pid = %pcb_box.pid, prio = pcb_box.priority, "Task queued (ScheduleTask).");
                 let mut pcb = *pcb_box;
-                
+
                 // Persistencia atómica antes de cambiar estado a Ready
-                self.persistence.save_pcb(&pcb).await.context("Atomic persistence failed during ScheduleTask")?;
-                
+                self.persistence
+                    .save_pcb(&pcb)
+                    .await
+                    .context("Atomic persistence failed during ScheduleTask")?;
+
                 pcb.state = ProcessState::Ready;
                 self.process_table.insert(pcb.pid.clone(), pcb.clone());
                 self.ready_queue.push(pcb);
@@ -147,13 +152,16 @@ impl CognitiveScheduler {
                 let graph = *graph_box;
                 let mut lock = self.graph_manager.write().await;
                 crate::scheduler::graph::GraphIntegrator::validate_and_register(&mut lock, graph);
-                
+
                 // Disparar primer tick para arrancar nodos iniciales
                 let new_pcbs = lock.tick();
                 drop(lock); // Soltamos el lock antes de encolar
 
                 for mut pcb in new_pcbs {
-                    self.persistence.save_pcb(&pcb).await.context("Failed to persist initial DAG task")?;
+                    self.persistence
+                        .save_pcb(&pcb)
+                        .await
+                        .context("Failed to persist initial DAG task")?;
                     pcb.state = ProcessState::Ready;
                     self.process_table.insert(pcb.pid.clone(), pcb.clone());
                     self.ready_queue.push(pcb);
@@ -162,9 +170,12 @@ impl CognitiveScheduler {
             SchedulerEvent::DispatchLocal(pcb_box) => {
                 info!(pid = %pcb_box.pid, prio = pcb_box.priority, "Task queued (DispatchLocal).");
                 let mut pcb = *pcb_box;
-                
-                self.persistence.save_pcb(&pcb).await.context("Failed to persist DispatchLocal")?;
-                
+
+                self.persistence
+                    .save_pcb(&pcb)
+                    .await
+                    .context("Failed to persist DispatchLocal")?;
+
                 pcb.state = ProcessState::Ready;
                 self.process_table.insert(pcb.pid.clone(), pcb.clone());
                 self.ready_queue.push(pcb);
@@ -175,9 +186,12 @@ impl CognitiveScheduler {
                     pcb.registers
                         .temp_vars
                         .insert("last_syscall_result".to_string(), result);
-                    
-                    self.persistence.save_pcb(&pcb).await.context("Failed to persist SyscallCompleted")?;
-                    
+
+                    self.persistence
+                        .save_pcb(&pcb)
+                        .await
+                        .context("Failed to persist SyscallCompleted")?;
+
                     pcb.state = ProcessState::Ready;
                     self.ready_queue.push(pcb);
                 }
@@ -193,8 +207,11 @@ impl CognitiveScheduler {
                                 pcb.registers
                                     .temp_vars
                                     .insert("final_output".to_string(), result.clone());
-                                
-                                self.persistence.save_pcb(pcb).await.context("Failed to persist Remote Completed state")?;
+
+                                self.persistence
+                                    .save_pcb(pcb)
+                                    .await
+                                    .context("Failed to persist Remote Completed state")?;
                                 pcb.state = ProcessState::Completed;
                             }
 
@@ -215,7 +232,10 @@ impl CognitiveScheduler {
                             };
 
                             for mut pcb in new_pcbs {
-                                self.persistence.save_pcb(&pcb).await.context("Failed to persist DAG next-ready task")?;
+                                self.persistence
+                                    .save_pcb(&pcb)
+                                    .await
+                                    .context("Failed to persist DAG next-ready task")?;
                                 pcb.state = ProcessState::Ready;
                                 self.process_table.insert(pcb.pid.clone(), pcb.clone());
                                 self.ready_queue.push(pcb);
@@ -236,8 +256,11 @@ impl CognitiveScheduler {
                     pcb.registers
                         .temp_vars
                         .insert("final_output".to_string(), output.clone());
-                    
-                    self.persistence.save_pcb(pcb).await.context("Failed to persist Local Completed state")?;
+
+                    self.persistence
+                        .save_pcb(pcb)
+                        .await
+                        .context("Failed to persist Local Completed state")?;
                     pcb.state = ProcessState::Completed;
                 }
 
@@ -258,7 +281,10 @@ impl CognitiveScheduler {
                 };
 
                 for mut pcb in new_pcbs {
-                    self.persistence.save_pcb(&pcb).await.context("Failed to persist DAG next-ready task (local)")?;
+                    self.persistence
+                        .save_pcb(&pcb)
+                        .await
+                        .context("Failed to persist DAG next-ready task (local)")?;
                     pcb.state = ProcessState::Ready;
                     self.process_table.insert(pcb.pid.clone(), pcb.clone());
                     self.ready_queue.push(pcb);
@@ -288,6 +314,7 @@ impl CognitiveScheduler {
 
     /// Despacha procesos de la cola de Listos a la "CPU" (ALU/LLM) local o al Swarm si es complejo.
     async fn reconcile(&mut self) -> anyhow::Result<()> {
+        use anyhow::Context;
         if self.current_running.is_none() && !self.ready_queue.is_empty() {
             if let Some(mut pcb) = self.ready_queue.pop() {
                 // LÓGICA DE TELEPORTACIÓN
@@ -350,11 +377,14 @@ impl CognitiveScheduler {
 
                 // FALLBACK O EJECUCIÓN SIMPLE: Despacho local
                 info!(pid = %pcb.pid, "Assigning process to local execution core.");
-                
+
                 // Regla ANK-2412: Persistir antes de cambiar a Running
                 pcb.state = ProcessState::Running;
-                self.persistence.save_pcb(&pcb).await.context("Failed to persist Running state")?;
-                
+                self.persistence
+                    .save_pcb(&pcb)
+                    .await
+                    .context("Failed to persist Running state")?;
+
                 self.current_running = Some(pcb.pid.clone());
                 self.process_table.insert(pcb.pid.clone(), pcb);
             }
@@ -368,9 +398,10 @@ pub type SharedScheduler = Arc<RwLock<CognitiveScheduler>>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[tokio::test]
-    async fn test_priority_scheduling() {
+    async fn test_priority_scheduling() -> anyhow::Result<()> {
         let mut scheduler = CognitiveScheduler::new(Arc::new(persistence::MockPersistor));
 
         let p10 = PCB::new("task-high".into(), 10, "mock".into());
@@ -380,34 +411,41 @@ mod tests {
         // Inyectamos fuera de orden
         scheduler
             .handle_event(SchedulerEvent::ScheduleTask(Box::new(p5a)))
-            .await
-            .unwrap();
+            .await?;
         scheduler
             .handle_event(SchedulerEvent::ScheduleTask(Box::new(p10)))
-            .await
-            .unwrap();
+            .await?;
         scheduler
             .handle_event(SchedulerEvent::ScheduleTask(Box::new(p5b)))
-            .await
-            .unwrap();
+            .await?;
 
         // Verificamos orden de salida
-        let first = scheduler.ready_queue.pop().unwrap();
+        let first = scheduler
+            .ready_queue
+            .pop()
+            .context("Ready queue should not be empty (first)")?;
         assert_eq!(
             first.process_name, "task-high",
             "Prioridad 10 debe salir primero"
         );
 
-        let second = scheduler.ready_queue.pop().unwrap();
+        let second = scheduler
+            .ready_queue
+            .pop()
+            .context("Ready queue should not be empty (second)")?;
         assert_eq!(
             second.process_name, "task-low-1",
             "FCFS para prioridad 5 (1)"
         );
 
-        let third = scheduler.ready_queue.pop().unwrap();
+        let third = scheduler
+            .ready_queue
+            .pop()
+            .context("Ready queue should not be empty (third)")?;
         assert_eq!(
             third.process_name, "task-low-2",
             "FCFS para prioridad 5 (2)"
         );
+        Ok(())
     }
 }

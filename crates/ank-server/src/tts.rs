@@ -1,5 +1,5 @@
-
 use ank_proto::v1::siren::SirenEvent;
+#[allow(unused_imports)]
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -20,7 +20,8 @@ impl SentenceAccumulator {
     pub async fn push_token(&mut self, token: &str) {
         self.buffer.push_str(token);
 
-        if token.contains('.') || token.contains('?') || token.contains('!') || token.contains('\n') {
+        if token.contains('.') || token.contains('?') || token.contains('!') || token.contains('\n')
+        {
             let sentence = self.buffer.trim().to_string();
             if !sentence.is_empty() {
                 if let Err(e) = self.tts_tx.send(sentence.clone()).await {
@@ -57,8 +58,8 @@ pub fn spawn_tts_worker(
             let audio_len = 22050 * 2 / 4;
             let mut mock_audio = vec![0u8; audio_len];
 
-            for i in 0..audio_len {
-                mock_audio[i] = (i % 256) as u8;
+            for (i, sample) in mock_audio.iter_mut().enumerate() {
+                *sample = (i % 256) as u8;
             }
 
             seq += 1;

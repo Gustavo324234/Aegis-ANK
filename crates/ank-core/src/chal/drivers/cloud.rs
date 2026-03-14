@@ -1,7 +1,7 @@
 use crate::chal::{DriverStatus, ExecutionError, Grammar, InferenceDriver, SystemError};
 use async_trait::async_trait;
 use futures_util::{Stream, StreamExt};
-use reqwest::{Client, RequestBuilder};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
@@ -130,8 +130,7 @@ impl InferenceDriver for CloudProxyDriver {
                         let line = buffer[..idx].trim().to_string();
                         buffer = buffer[idx + 1..].to_string();
 
-                        if line.starts_with("data: ") {
-                            let data = &line["data: ".len()..];
+                        if let Some(data) = line.strip_prefix("data: ") {
                             if data == "[DONE]" {
                                 continue;
                             }

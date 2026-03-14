@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 use wasmtime::{Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::pipe::{MemoryInputPipe, MemoryOutputPipe};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
 
-pub mod watcher;
 pub mod signer;
+pub mod watcher;
 
-use crate::enclave::TenantDB;
 use self::signer::PluginSigner;
+use crate::enclave::TenantDB;
 
 /// --- PLUGIN ERROR SYSTEM (ANK-2411 Hardening) ---
 #[derive(Error, Debug)]
@@ -77,6 +77,15 @@ impl PluginManager {
     /// Inicializa el motor de Wasm con configuraciones optimizadas
     /// y medidas de seguridad (Fuel consumption, WASI, CPU limits).
     pub fn new() -> Result<Self, PluginError> {
+        // En un entorno real, AEGIS_ROOT_KEY vendría de enclave/vault.
+        let public_key = [0u8; 32];
+        let signer = PluginSigner::new(&public_key)
+            .map_err(|e| PluginError::IOError(format!("Failed to init Signer: {}", e)))?;
+        Self::new_with_signer(signer)
+    }
+
+    /// Inicializa el gestor con un firmador específico (útil para tests o rotación de llaves).
+    pub fn new_with_signer(signer: PluginSigner) -> Result<Self, PluginError> {
         let mut config = Config::new();
 
         // --- CONFIGURACIÓN DE SEGURIDAD Y RENDIMIENTO ---
@@ -93,12 +102,6 @@ impl PluginManager {
             &mut s.wasi_ctx
         })
         .map_err(|e| PluginError::CompilationFailed(e.to_string()))?;
-
-        // Root key para validación de plugins (Ring 0)
-        // En un entorno real, AEGIS_ROOT_KEY vendría de enclave/vault.
-        let public_key = [0u8; 32]; 
-        let signer = PluginSigner::new(&public_key)
-            .map_err(|e| PluginError::IOError(format!("Failed to init Signer: {}", e)))?;
 
         Ok(Self {
             engine,
@@ -119,7 +122,8 @@ impl PluginManager {
     ) -> Result<(), PluginError> {
         // En reload_plugin_module asumimos que el watcher ya verificó la firma o lo haremos aquí.
         // Por seguridad, siempre verificamos firma antes de cargar al mapa.
-        self.signer.verify_plugin(path)
+        self.signer
+            .verify_plugin(path)
             .map_err(|e| PluginError::SecurityViolation(e.to_string()))?;
 
         let name = Path::new(path)
@@ -190,11 +194,13 @@ impl PluginManager {
     /// [ANK-2411] MANDATORY Signature Verification.
     pub async fn load_plugin(&mut self, path: &str) -> Result<(), PluginError> {
         // 0. Firma Obligatoria (Ring 0 Policy)
-        self.signer.verify_plugin(path)
-            .map_err(|e| {
-                error!("SECURITY ALERT: Plugin signature mismatch for {}: {}", path, e);
-                PluginError::SecurityViolation(e.to_string())
-            })?;
+        self.signer.verify_plugin(path).map_err(|e| {
+            error!(
+                "SECURITY ALERT: Plugin signature mismatch for {}: {}",
+                path, e
+            );
+            PluginError::SecurityViolation(e.to_string())
+        })?;
 
         let name = Path::new(path)
             .file_stem()
@@ -286,7 +292,10 @@ impl PluginManager {
                     if let Err(e) = self.load_plugin(path_str).await {
                         error!("Failed to load plugin {}: {}", path_str, e);
                     } else {
-                        info!("Plugin loaded and verified: {:?}", path.file_name().unwrap_or_default());
+                        info!(
+                            "Plugin loaded and verified: {:?}",
+                            path.file_name().unwrap_or_default()
+                        );
                     }
                 }
             }
@@ -310,9 +319,8 @@ impl PluginManager {
         let mut final_input = input_json.to_string();
         if plugin_name == "std_net" {
             // ... (keep fetch_url_safe logic) ...
-            let req: serde_json::Value = serde_json::from_str(input_json).map_err(|e| {
-                PluginError::LogicError(format!("Invalid JSON for std_net: {}", e))
-            })?;
+            let req: serde_json::Value = serde_json::from_str(input_json)
+                .map_err(|e| PluginError::LogicError(format!("Invalid JSON for std_net: {}", e)))?;
 
             if let Some(action) = req.get("action").and_then(|a| a.as_str()) {
                 if action != "get_metadata" {
@@ -325,9 +333,7 @@ impl PluginManager {
                                 .and_then(|u| u.as_str())
                         })
                         .ok_or_else(|| {
-                            PluginError::LogicError(
-                                "std_net requires 'url' parameter".to_string(),
-                            )
+                            PluginError::LogicError("std_net requires 'url' parameter".to_string())
                         })?;
 
                     let raw_html = self.fetch_url_safe(url).await?;
@@ -343,13 +349,12 @@ impl PluginManager {
         }
 
         let stdin = MemoryInputPipe::new(final_input.as_bytes().to_vec());
-        let stdout = MemoryOutputPipe::new(4096 * 10); 
+        let stdout = MemoryOutputPipe::new(4096 * 10);
 
         // 2. Construir el contexto WASI (Dynamic Jailing)
         let workspace_path = format!("./users/{}/workspace", tenant_id);
-        std::fs::create_dir_all(&workspace_path).map_err(|e| {
-            PluginError::IOError(format!("Failed to create jail: {}", e))
-        })?;
+        std::fs::create_dir_all(&workspace_path)
+            .map_err(|e| PluginError::IOError(format!("Failed to create jail: {}", e)))?;
 
         let mut wasi_builder = wasmtime_wasi::WasiCtxBuilder::new();
         wasi_builder
@@ -361,9 +366,7 @@ impl PluginManager {
                 wasmtime_wasi::DirPerms::all(),
                 wasmtime_wasi::FilePerms::all(),
             )
-            .map_err(|e| {
-                PluginError::SecurityViolation(format!("Jailing Failed: {}", e))
-            })?;
+            .map_err(|e| PluginError::SecurityViolation(format!("Jailing Failed: {}", e)))?;
         let wasi_ctx = wasi_builder.build_p1();
 
         let state = PluginState {
@@ -372,7 +375,9 @@ impl PluginManager {
         };
 
         let mut store = Store::new(&self.engine, state);
-        store.set_fuel(1_000_000).map_err(|e| PluginError::LogicError(e.to_string()))?;
+        store
+            .set_fuel(1_000_000)
+            .map_err(|e| PluginError::LogicError(e.to_string()))?;
 
         // 3. Instanciar
         let instance = self
@@ -395,14 +400,21 @@ impl PluginManager {
                         // TAINTED POLICY: Mark in TenantDB
                         // En un entorno real, AEGIS_SESSION_KEY vendría del contexto.
                         if let Ok(db) = TenantDB::open(tenant_id, "default_internal_key") {
-                           let _ = db.set_kv(&format!("plugin_status:{}", plugin_name), "TAINTED");
+                            let _ = db.set_kv(&format!("plugin_status:{}", plugin_name), "TAINTED");
                         }
-                        return Err(PluginError::SecurityViolation("Memory Out Of Bounds (Potential Buffer Overflow Attack)".to_string()));
+                        return Err(PluginError::SecurityViolation(
+                            "Memory Out Of Bounds (Potential Buffer Overflow Attack)".to_string(),
+                        ));
                     }
-                    wasmtime::Trap::StackOverflow | wasmtime::Trap::UnreachableCode => {
+                    wasmtime::Trap::StackOverflow => {
                         return Err(PluginError::LogicError(format!("Runtime Trap: {}", trap)));
                     }
-                    _ => return Err(PluginError::LogicError(format!("Unknown Trap: {}", trap))),
+                    _ => {
+                        return Err(PluginError::LogicError(format!(
+                            "Unknown or Unreachable Trap: {}",
+                            trap
+                        )))
+                    }
                 }
             }
             return Err(PluginError::ExecutionFailed(e.to_string()));
@@ -413,7 +425,6 @@ impl PluginManager {
         String::from_utf8(output_bytes.to_vec())
             .map_err(|e| PluginError::ExecutionFailed(format!("Invalid UTF-8 output: {}", e)))
     }
-
 
     /// Implementación de seguridad SRE para peticiones HTTP.
     /// Bloquea ataques SSRF validando que la URL no apunte a rangos locales o privados.
@@ -513,6 +524,8 @@ impl PluginManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
+    use ed25519_dalek::Signer;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -523,8 +536,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_wasm_execution_trap_handling() {
-        let mut manager = PluginManager::new().unwrap();
+    async fn test_wasm_execution_trap_handling() -> anyhow::Result<()> {
+        use ed25519_dalek::SigningKey;
+
+        // 1. Generar llaves de prueba
+        let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+        let verifying_key = signing_key.verifying_key();
+
+        let signer =
+            PluginSigner::new(&verifying_key.to_bytes()).context("Failed to create test signer")?;
+        let mut manager = PluginManager::new_with_signer(signer)?;
 
         // Un wasm mínimo que hace un unreachable (trap)
         let wasm_bytes = [
@@ -533,14 +554,27 @@ mod tests {
             0x00, 0x00, 0x0a, 0x05, 0x01, 0x03, 0x00, 0x00, 0x0b,
         ];
 
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(&wasm_bytes).unwrap();
-        let path = file.path().to_str().unwrap();
+        let mut file = NamedTempFile::new().context("Failed to create temp file")?;
+        file.write_all(&wasm_bytes)
+            .context("Failed to write wasm bytes")?;
+        let path = file
+            .path()
+            .to_str()
+            .context("Temp file path is not UTF-8")?;
 
-        manager.load_plugin(path).await.unwrap();
+        // 2. Firmar el WASM
+        let signature = signing_key.sign(&wasm_bytes);
+        let sig_path = file.path().with_extension("wasm.sig");
+        std::fs::write(&sig_path, signature.to_bytes()).context("Failed to write signature")?;
+
+        manager.load_plugin(path).await?;
         let res = manager.execute_plugin("test_tenant", "test", "{}").await;
 
         assert!(res.is_err());
-        // Debe ser un ExecutionTrap o similar
+
+        // Limpiar firma manual
+        let _ = std::fs::remove_file(sig_path);
+
+        Ok(())
     }
 }

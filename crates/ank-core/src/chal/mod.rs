@@ -248,8 +248,8 @@ mod tests {
     use tokio_stream::StreamExt;
 
     #[tokio::test]
-    async fn test_hybrid_smart_routing_high_priority() {
-        let pm = Arc::new(RwLock::new(PluginManager::new().unwrap()));
+    async fn test_hybrid_smart_routing_high_priority() -> anyhow::Result<()> {
+        let pm = Arc::new(RwLock::new(PluginManager::new()?));
         let mut hal = CognitiveHAL::new(pm);
 
         hal.register_driver(
@@ -271,20 +271,21 @@ mod tests {
         let shared_pcb = Arc::new(RwLock::new(pcb));
 
         // Debe enrutar a cloud-driver
-        let stream_res = hal.route_and_execute(shared_pcb).await.unwrap();
+        let stream_res = hal.route_and_execute(shared_pcb).await?;
         let tokens: Vec<_> = stream_res.collect().await;
 
         assert_eq!(tokens.len(), 1);
-        let response = tokens[0].as_ref().unwrap();
+        let response = tokens[0].as_ref().map_err(|e| anyhow::anyhow!("{}", e))?;
         assert!(
             response.contains("[cloud]"),
             "Debe haber seleccionado el driver cloud por alta prioridad"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_hybrid_smart_routing_low_priority() {
-        let pm = Arc::new(RwLock::new(PluginManager::new().unwrap()));
+    async fn test_hybrid_smart_routing_low_priority() -> anyhow::Result<()> {
+        let pm = Arc::new(RwLock::new(PluginManager::new()?));
         let mut hal = CognitiveHAL::new(pm);
 
         hal.register_driver(
@@ -306,13 +307,14 @@ mod tests {
         let shared_pcb = Arc::new(RwLock::new(pcb));
 
         // Debe enrutar a local-driver
-        let stream_res = hal.route_and_execute(shared_pcb).await.unwrap();
+        let stream_res = hal.route_and_execute(shared_pcb).await?;
         let tokens: Vec<_> = stream_res.collect().await;
 
-        let response = tokens[0].as_ref().unwrap();
+        let response = tokens[0].as_ref().map_err(|e| anyhow::anyhow!("{}", e))?;
         assert!(
             response.contains("[local]"),
             "Debe haber seleccionado el driver local por baja prioridad"
         );
+        Ok(())
     }
 }

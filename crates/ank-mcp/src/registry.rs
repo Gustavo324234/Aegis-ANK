@@ -1,11 +1,11 @@
+use crate::client::McpClientSession;
+use crate::error::McpError;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use tracing::{info, warn, debug};
-use crate::client::McpClientSession;
-use crate::error::McpError;
+use tracing::{debug, info, warn};
 
 /// Representación cognitiva de una herramienta para el LLM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +22,12 @@ pub struct McpToolRegistry {
     tools: RwLock<HashMap<String, McpTool>>,
 }
 
+impl Default for McpToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpToolRegistry {
     pub fn new() -> Self {
         Self {
@@ -32,14 +38,20 @@ impl McpToolRegistry {
     /// Descubre y registra las herramientas de una sesión MCP específica.
     pub async fn discover_tools(&self, session: Arc<McpClientSession>) -> Result<usize, McpError> {
         debug!("ANK-MCP: Solicitando herramientas (tools/list) al servidor");
-        
+
         // El servidor MCP responde con un objeto que tiene una clave "tools"
-        let response = session.call("tools/list", Value::Object(Default::default())).await?;
-        
-        let tools_array = response.get("tools")
+        let response = session
+            .call("tools/list", Value::Object(Default::default()))
+            .await?;
+
+        let tools_array = response
+            .get("tools")
             .and_then(|v| v.as_array())
             .ok_or_else(|| {
-                warn!("ANK-MCP: Respuesta de tools/list malformada: {:?}", response);
+                warn!(
+                    "ANK-MCP: Respuesta de tools/list malformada: {:?}",
+                    response
+                );
                 McpError::DiscoveryFailed("Respuesta no contiene array de tools".into())
             })?;
 
@@ -65,13 +77,21 @@ impl McpToolRegistry {
 
     /// Parsea un esquema JSON de herramienta MCP a la estructura interna.
     fn parse_tool(&self, val: &Value, session: Arc<McpClientSession>) -> Result<McpTool, String> {
-        let name = val.get("name").and_then(|v| v.as_str())
-            .ok_or("Falta campo 'name'")?.to_string();
-        
-        let description = val.get("description").and_then(|v| v.as_str())
-            .ok_or("Falta campo 'description'")?.to_string();
-        
-        let input_schema = val.get("inputSchema").cloned()
+        let name = val
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or("Falta campo 'name'")?
+            .to_string();
+
+        let description = val
+            .get("description")
+            .and_then(|v| v.as_str())
+            .ok_or("Falta campo 'description'")?
+            .to_string();
+
+        let input_schema = val
+            .get("inputSchema")
+            .cloned()
             .ok_or("Falta campo 'inputSchema'")?;
 
         Ok(McpTool {
@@ -95,7 +115,10 @@ impl McpToolRegistry {
 
         for tool in tools.values() {
             prompt.push_str(&format!("- **{}**: {}\n", tool.name, tool.description));
-            prompt.push_str(&format!("  Args Schema: {}\n\n", serde_json::to_string(&tool.input_schema).unwrap_or_default()));
+            prompt.push_str(&format!(
+                "  Args Schema: {}\n\n",
+                serde_json::to_string(&tool.input_schema).unwrap_or_default()
+            ));
         }
 
         prompt
@@ -117,22 +140,32 @@ impl McpToolDispatcher {
         tool_name: &str,
         args: Value,
     ) -> Result<Value, McpError> {
-        let tool = registry.get_tool(tool_name).await
+        let tool = registry
+            .get_tool(tool_name)
+            .await
             .ok_or_else(|| McpError::ToolNotFound(tool_name.to_string()))?;
 
-        let session = tool.session.as_ref()
+        let session = tool
+            .session
+            .as_ref()
             .ok_or_else(|| McpError::Internal("No session found for tool".into()))?;
 
         // TODO: Implementación de jsonschema para validación estricta
         // Por ahora, solo validamos que sea un objeto si el esquema dice tipo object
         if let Some(schema_type) = tool.input_schema.get("type").and_then(|v| v.as_str()) {
             if schema_type == "object" && !args.is_object() {
-                return Err(McpError::ValidationError(format!("Se esperaba un objeto para {}, se recibió {:?}", tool_name, args)));
+                return Err(McpError::ValidationError(format!(
+                    "Se esperaba un objeto para {}, se recibió {:?}",
+                    tool_name, args
+                )));
             }
         }
 
-        debug!("ANK-MCP: Ejecutando herramienta '{}' con args: {:?}", tool_name, args);
-        
+        debug!(
+            "ANK-MCP: Ejecutando herramienta '{}' con args: {:?}",
+            tool_name, args
+        );
+
         // Llamada formal: method "tools/call", params { "name": ..., "arguments": ... }
         let call_params = serde_json::json!({
             "name": tool_name,
@@ -146,10 +179,10 @@ impl McpToolDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::{McpTransport, JsonRpcMessage};
+    use crate::transport::{JsonRpcMessage, McpTransport};
     use async_trait::async_trait;
-    use std::pin::Pin;
     use futures_util::Stream;
+    use std::pin::Pin;
 
     struct MockToolServer;
 
@@ -159,7 +192,9 @@ mod tests {
             Ok(())
         }
 
-        fn receive_messages(&self) -> Pin<Box<dyn Stream<Item = anyhow::Result<JsonRpcMessage>> + Send>> {
+        fn receive_messages(
+            &self,
+        ) -> Pin<Box<dyn Stream<Item = anyhow::Result<JsonRpcMessage>> + Send>> {
             let stream = async_stream::try_stream! {
                 // Respondemos a tools/list
                 yield JsonRpcMessage::Response {
@@ -195,7 +230,7 @@ mod tests {
         // Mocking the call because MockToolServer doesn't really handle IDs correctly in this simple test
         // but discover_tools calls session.call, which generates a random UUID.
         // For the test, we'll just manually register a tool to verify prompt generation.
-        
+
         let tool = McpTool {
             name: "test_tool".into(),
             description: "A test tool".into(),

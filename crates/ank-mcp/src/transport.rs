@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use futures_util::Stream;
+use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
 /// Representación atómica de un mensaje JSON-RPC 2.0 según la especificación MCP.

@@ -1,6 +1,6 @@
 use crate::pcb::PCB;
 use crate::scheduler::ModelPreference;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -44,6 +44,12 @@ pub struct NodeResult {
 /// --- GRAPH MANAGER (EL ORQUESTADOR) ---
 pub struct GraphManager {
     pub active_graphs: HashMap<String, ExecutionGraph>,
+}
+
+impl Default for GraphManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GraphManager {
@@ -107,7 +113,7 @@ impl GraphManager {
 
                     let mut pcb = PCB::new(node.node_id.clone(), 5, description);
 
-                    pcb.model_pref = node.required_model.clone();
+                    pcb.model_pref = node.required_model;
                     pcb.parent_pid = Some(graph_id.clone());
                     pcb.inlined_context = deps_context;
 
@@ -128,7 +134,7 @@ impl GraphManager {
                 return Ok(());
             }
         }
-        bail!("Node {} not found in any active graph", result.node_id)
+        anyhow::bail!("Node {} not found in any active graph", result.node_id)
     }
 
     /// Implementación del Planner S-DAG
@@ -183,9 +189,10 @@ impl GraphManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[test]
-    fn test_diamond_graph_parallel_execution() {
+    fn test_diamond_graph_parallel_execution() -> anyhow::Result<()> {
         let mut manager = GraphManager::new();
 
         // Estructura Diamante: A -> [B, C] -> D
@@ -256,13 +263,11 @@ mod tests {
 
         // 2. Finalizar A
         println!("[DEBUG] Handle A...");
-        manager
-            .handle_result(NodeResult {
-                node_id: "A".into(),
-                output: "Output from A".into(),
-                status: DagNodeStatus::Completed,
-            })
-            .unwrap();
+        manager.handle_result(NodeResult {
+            node_id: "A".into(),
+            output: "Output from A".into(),
+            status: DagNodeStatus::Completed,
+        })?;
 
         // 3. Tick: B y C deben salir en PARALELO
         println!("[DEBUG] Tick 2 (B and C)...");
@@ -274,26 +279,22 @@ mod tests {
 
         // 4. Finalizar B (D sigue bloqueado porque falta C)
         println!("[DEBUG] Handle B...");
-        manager
-            .handle_result(NodeResult {
-                node_id: "B".into(),
-                output: "Code B".into(),
-                status: DagNodeStatus::Completed,
-            })
-            .unwrap();
+        manager.handle_result(NodeResult {
+            node_id: "B".into(),
+            output: "Code B".into(),
+            status: DagNodeStatus::Completed,
+        })?;
 
         println!("[DEBUG] Tick 3 (Should be empty)...");
         assert!(manager.tick().is_empty());
 
         // 5. Finalizar C
         println!("[DEBUG] Handle C...");
-        manager
-            .handle_result(NodeResult {
-                node_id: "C".into(),
-                output: "Code C".into(),
-                status: DagNodeStatus::Completed,
-            })
-            .unwrap();
+        manager.handle_result(NodeResult {
+            node_id: "C".into(),
+            output: "Code C".into(),
+            status: DagNodeStatus::Completed,
+        })?;
 
         // 6. Tick: D debe salir con el contexto de B y C inyectado
         println!("[DEBUG] Tick 4 (D)...");
@@ -305,9 +306,22 @@ mod tests {
         assert_eq!(pcb_d.process_name, "D");
 
         // Verificar Context Forwarding (Join/Gather)
-        assert_eq!(pcb_d.inlined_context.get("dependency_B").unwrap(), "Code B");
-        assert_eq!(pcb_d.inlined_context.get("dependency_C").unwrap(), "Code C");
+        assert_eq!(
+            pcb_d
+                .inlined_context
+                .get("dependency_B")
+                .context("dependency_B should be present")?,
+            "Code B"
+        );
+        assert_eq!(
+            pcb_d
+                .inlined_context
+                .get("dependency_C")
+                .context("dependency_C should be present")?,
+            "Code C"
+        );
 
         println!("Diamond Graph Flow: SUCCESS. Task D gathered parallel context correctly.");
+        Ok(())
     }
 }

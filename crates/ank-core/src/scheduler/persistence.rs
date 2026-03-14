@@ -1,5 +1,5 @@
 use crate::pcb::PCB;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
@@ -20,6 +20,7 @@ pub struct SQLCipherPersistor {
 
 impl SQLCipherPersistor {
     pub fn new(db_path: &str, key: &str) -> Result<Self> {
+        use anyhow::Context;
         info!(path = %db_path, "Initializing PersistenceManager (SQLCipher).");
         let conn = Connection::open(db_path).context("Failed to open SQLCipher database")?;
 
@@ -52,23 +53,23 @@ impl SQLCipherPersistor {
 #[async_trait]
 impl StatePersistor for SQLCipherPersistor {
     async fn save_pcb(&self, pcb: &PCB) -> Result<()> {
+        use anyhow::Context;
         let pcb_clone = pcb.clone();
         let conn = self.conn.clone();
 
         task::spawn_blocking(move || {
             let json_data = serde_json::to_string(&pcb_clone).context("Failed to serialize PCB")?;
-            let lock = conn.lock().map_err(|_| anyhow::anyhow!("Mutex poison error"))?;
-            
+            let lock = conn
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Mutex poison error"))?;
+
             lock.execute(
                 "INSERT OR REPLACE INTO process_control_blocks (pid, state, data, updated_at) 
                  VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)",
-                (
-                    &pcb_clone.pid,
-                    format!("{:?}", pcb_clone.state),
-                    json_data,
-                ),
-            ).context("Failed to execute INSERT/REPLACE on PCB table")?;
-            
+                (&pcb_clone.pid, format!("{:?}", pcb_clone.state), json_data),
+            )
+            .context("Failed to execute INSERT/REPLACE on PCB table")?;
+
             debug!(pid = %pcb_clone.pid, "PCB persisted successfully.");
             Ok(())
         })
@@ -77,15 +78,20 @@ impl StatePersistor for SQLCipherPersistor {
     }
 
     async fn delete_pcb(&self, pid: &str) -> Result<()> {
+        use anyhow::Context;
         let pid_str = pid.to_string();
         let conn = self.conn.clone();
 
         task::spawn_blocking(move || {
-            let lock = conn.lock().map_err(|_| anyhow::anyhow!("Mutex poison error"))?;
+            use anyhow::Context;
+            let lock = conn
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Mutex poison error"))?;
             lock.execute(
                 "DELETE FROM process_control_blocks WHERE pid = ?1",
                 [&pid_str],
-            ).context("Failed to delete PCB from disk")?;
+            )
+            .context("Failed to delete PCB from disk")?;
             Ok(())
         })
         .await
@@ -93,10 +99,13 @@ impl StatePersistor for SQLCipherPersistor {
     }
 
     async fn load_all_pcbs(&self) -> Result<Vec<PCB>> {
+        use anyhow::Context;
         let conn = self.conn.clone();
 
         task::spawn_blocking(move || {
-            let lock = conn.lock().map_err(|_| anyhow::anyhow!("Mutex poison error"))?;
+            let lock = conn
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Mutex poison error"))?;
             let mut stmt = lock.prepare("SELECT data FROM process_control_blocks")?;
             let pcb_iter = stmt.query_map([], |row| {
                 let data: String = row.get(0)?;
@@ -107,7 +116,11 @@ impl StatePersistor for SQLCipherPersistor {
             for pcb_json_res in pcb_iter {
                 let json_str = pcb_json_res?;
                 let pcb: PCB = serde_json::from_str(&json_str).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
                 })?;
                 results.push(pcb);
             }
@@ -118,9 +131,12 @@ impl StatePersistor for SQLCipherPersistor {
     }
 
     async fn flush(&self) -> Result<()> {
+        use anyhow::Context;
         let conn = self.conn.clone();
         task::spawn_blocking(move || {
-            let lock = conn.lock().map_err(|_| anyhow::anyhow!("Mutex poison error"))?;
+            let lock = conn
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Mutex poison error"))?;
             lock.execute("PRAGMA wal_checkpoint(TRUNCATE)", [])?;
             info!("Persistence flush completed.");
             Ok(())
@@ -136,8 +152,16 @@ pub struct MockPersistor;
 #[cfg(test)]
 #[async_trait]
 impl StatePersistor for MockPersistor {
-    async fn save_pcb(&self, _pcb: &PCB) -> Result<()> { Ok(()) }
-    async fn delete_pcb(&self, _pid: &str) -> Result<()> { Ok(()) }
-    async fn load_all_pcbs(&self) -> Result<Vec<PCB>> { Ok(Vec::new()) }
-    async fn flush(&self) -> Result<()> { Ok(()) }
+    async fn save_pcb(&self, _pcb: &PCB) -> Result<()> {
+        Ok(())
+    }
+    async fn delete_pcb(&self, _pid: &str) -> Result<()> {
+        Ok(())
+    }
+    async fn load_all_pcbs(&self) -> Result<Vec<PCB>> {
+        Ok(Vec::new())
+    }
+    async fn flush(&self) -> Result<()> {
+        Ok(())
+    }
 }

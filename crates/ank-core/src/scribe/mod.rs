@@ -116,8 +116,12 @@ impl ScribeManager {
         let repo = Repository::open(&tenant_path)
             .map_err(|e| ScribeError::GitError(format!("Failed to open repo: {}", e)))?;
 
-        // 2. Escritura física asíncrona
-        let full_path = Path::new(&self.root_path).join(file_path);
+        // 2. Escritura física asíncrona - Aseguramos que el directorio exista
+        let full_path = Path::new(&tenant_path).join(file_path);
+        if let Some(parent) = full_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
         tokio::fs::write(&full_path, content)
             .await
             .map_err(|e| ScribeError::FileWriteError(file_path.to_string(), e.to_string()))?;
@@ -214,17 +218,18 @@ impl ScribeManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn test_scribe_init_and_commit() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().to_str().unwrap();
+    async fn test_scribe_init_and_commit() -> anyhow::Result<()> {
+        let dir = tempdir().context("Failed to create tempdir")?;
+        let root = dir.path().to_str().context("Tempdir path is not UTF-8")?;
         let scribe = ScribeManager::new(root);
         let tenant_id = "user_123";
 
         // 1. Init
-        scribe.init_repo(tenant_id).await.unwrap();
+        scribe.init_repo(tenant_id).await?;
         assert!(scribe.is_initialized(tenant_id));
 
         // 2. Commit
@@ -235,32 +240,38 @@ mod tests {
             impact: ImpactLevel::Low,
         };
 
+        let tenant_path = scribe.compute_tenant_path(tenant_id);
+        std::fs::create_dir_all(Path::new(&tenant_path)).unwrap_or_default();
+
         scribe
             .write_and_commit(tenant_id, "test.txt", b"Hello Scribe", metadata.clone())
             .await
-            .expect("Failed to write and commit");
+            .context("Failed to write and commit")?;
 
         // 3. Verify
         let tenant_path = scribe.compute_tenant_path(tenant_id);
-        let repo = Repository::open(&tenant_path).unwrap();
-        let head = repo.head().unwrap();
-        let commit = head.peel_to_commit().unwrap();
+        let repo =
+            Repository::open(&tenant_path).context("Failed to open repo for verification")?;
+        let head = repo.head().context("Failed to get HEAD")?;
+        let commit = head.peel_to_commit().context("Failed to peel to commit")?;
 
         assert_eq!(commit.message(), Some("Initial test commit"));
         assert_eq!(commit.author().name(), Some("ANK Scribe"));
 
         // Check file exists
-        let content = std::fs::read_to_string(Path::new(&tenant_path).join("test.txt")).unwrap();
+        let content = std::fs::read_to_string(Path::new(&tenant_path).join("test.txt"))
+            .context("Failed to read committed file")?;
         assert_eq!(content, "Hello Scribe");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_scribe_error_on_empty_metadata() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().to_str().unwrap();
+    async fn test_scribe_error_on_empty_metadata() -> anyhow::Result<()> {
+        let dir = tempdir().context("Failed to create tempdir")?;
+        let root = dir.path().to_str().context("Tempdir path is not UTF-8")?;
         let scribe = ScribeManager::new(root);
         let tenant_id = "user_456";
-        scribe.init_repo(tenant_id).await.unwrap();
+        scribe.init_repo(tenant_id).await?;
 
         let metadata = CommitMetadata {
             task_id: "test-2".into(),
@@ -273,5 +284,6 @@ mod tests {
             .write_and_commit(tenant_id, "error.txt", b"fails", metadata)
             .await;
         assert!(matches!(result, Err(ScribeError::MissingMetadata(_))));
+        Ok(())
     }
 }

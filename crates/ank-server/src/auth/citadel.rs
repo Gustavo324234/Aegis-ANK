@@ -1,6 +1,6 @@
+use base64::prelude::*;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use base64::prelude::*;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -24,7 +24,7 @@ pub fn generate_public_tenant_id(raw_id: &str, root_key: &[u8]) -> Result<String
 
     let mut mac = HmacSha256::new_from_slice(root_key)
         .map_err(|e| CitadelError::CryptoError(e.to_string()))?;
-    
+
     mac.update(raw_id.as_bytes());
     let result = mac.finalize();
     let bytes = result.into_bytes();
@@ -42,26 +42,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tenant_id_obfuscation() {
+    fn test_tenant_id_obfuscation() -> anyhow::Result<()> {
         let root_key = b"Aegis_Master_Secret";
         let tenant_id = "tenant-42";
-        
-        let hash1 = generate_public_tenant_id(tenant_id, root_key).expect("Should generate hash");
-        let hash2 = generate_public_tenant_id(tenant_id, root_key).expect("Should be deterministic");
+
+        let hash1 = generate_public_tenant_id(tenant_id, root_key)?;
+        let hash2 = generate_public_tenant_id(tenant_id, root_key)?;
 
         assert_eq!(hash1, hash2);
         assert!(!hash1.contains(tenant_id));
         assert!(!hash1.is_empty());
+        Ok(())
     }
 
     #[test]
     fn test_grpc_error_leakage() {
         let private = "tenant-leak-007";
         let public = "REDACTED-HASH-XYZ";
-        let msg = format!("Critical error: database /data/{}/main.db is locked", private);
-        
+        let msg = format!(
+            "Critical error: database /data/{}/main.db is locked",
+            private
+        );
+
         let sanitized = sanitize_error(&msg, private, public);
-        
+
         assert!(!sanitized.contains(private));
         assert!(sanitized.contains(public));
     }

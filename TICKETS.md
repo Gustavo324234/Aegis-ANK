@@ -5,6 +5,16 @@ Este archivo es la fuente de verdad del progreso del Aegis Neural Kernel. El pro
 El Protocolo Siren ha sido implementado exitosamente, habilitando soporte para audio mediante gRPC estricto y políticas de backpressure que garantizan tolerancia a fallos.
 
 🟩 DONE (Completado)
+- [ANK-916] Syscall Test Payload Alignment (Final): Alignment of test payloads with strict StreamInterceptor protocol [ANK-916] `[DONE]`
+- [ANK-915] Syscall Test Payload Alignment: Sync test payloads with strict StreamInterceptor protocol (v0.6.3) `[DONE]`
+- [ANK-913] Test Suite Modernization: Comply with Ed25519 & Strict SRE Policies (v0.6.2) `[DONE]`
+- [ANK-912] THE AST RECONSTRUCTION: Scoping, Dalek v2 & Clippy Purge (v0.6.1) `[DONE]`
+- [ANK-911] Global Code Sanitization & Strict SRE Idioms (v0.6.0) `[DONE]`
+- [ANK-910] Zero-Tolerance Clippy Purge & Manual Indexing Sanitization `[DONE]`
+- [ANK-908] Dependency Hell Resolution & Explicit Anyhow Imports `[DONE]`
+- [ANK-906] Clippy Refactor & Idiomatic Rust Fixes (SRE Firewall Audit) `[DONE]`
+- [ANK-905] Payload Enum Optimization (Clippy large_enum_variant fix) (v0.1.3 REFIX) `[DONE]`
+- [ANK-903] Dockerfile Protoc Hotfix (Compilación de protos) `[DONE]`
 - [ANK-3003] MCP Cognitive Binding (Tool Discovery & Execution) (v2.1.0)
 - [ANK-2415] StdIO Transport & Subprocess Jailing (v1.4.0)
 - [ANK-2410] Citadel Identity Hardening (Zero-Leakage) (v2.1.0)

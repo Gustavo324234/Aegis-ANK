@@ -1,9 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::Connection;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Master Admin Enclave para gestionar superadministradores y mapeos de Tenant_ID a Puertos.
 /// Se persiste de manera segura con SQLCipher.
@@ -22,11 +22,13 @@ impl MasterEnclave {
         let path = Path::new(db_path);
         if let Some(parent) = path.parent() {
             if !parent.exists() {
+                use anyhow::Context;
                 std::fs::create_dir_all(parent)
-                    .with_context(|| format!("Failed to create directory for admin db"))?;
+                    .with_context(|| "Failed to create directory for admin db".to_string())?;
             }
         }
 
+        use anyhow::Context;
         let conn = Connection::open(db_path)
             .with_context(|| format!("Failed to open master database at {}", db_path))?;
 
@@ -52,7 +54,7 @@ impl MasterEnclave {
 
     async fn init_schema(&self) -> Result<()> {
         let conn = self.connection.lock().await;
-
+        use anyhow::Context;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS master_admin (
                 id INTEGER PRIMARY KEY DEFAULT 1,
@@ -126,6 +128,7 @@ impl MasterEnclave {
 
     /// Inicializa el super administrador (solo si no hay ninguno)
     pub async fn initialize_master(&self, username: &str, passphrase: &str) -> Result<()> {
+        use anyhow::Context;
         if self.is_initialized().await? {
             anyhow::bail!("Master Admin is already initialized. Cannot overwrite.");
         }
@@ -214,6 +217,7 @@ impl MasterEnclave {
 
     /// Genera un nuevo tenant con puerto incrementado asignado, y lo registra
     pub async fn create_tenant(&self, tenant_id: &str) -> Result<(u32, String)> {
+        use anyhow::Context;
         let conn = self.connection.lock().await;
         // En un escenario real, buscaríamos el último puerto usado.
         let mut stmt = conn.prepare("SELECT MAX(network_port) FROM tenants")?;
@@ -255,6 +259,7 @@ impl MasterEnclave {
         tenant_id: &str,
         _new_passphrase: &str,
     ) -> Result<()> {
+        use anyhow::Context;
         let conn = self.connection.lock().await;
         let rows = conn
             .execute(
@@ -272,34 +277,53 @@ impl MasterEnclave {
     }
 }
 
+impl Default for MasterEnclave {
+    fn default() -> Self {
+        // En un entorno real esto debería fallar o usar una DB en memoria.
+        // Como Default no puede ser async, bloqueamos el hilo para el test o usamos un truco.
+        // Para simplificar el test_bridge, usaremos un path y key hardcodeados bloqueantes.
+        // SRE Warning: Solo usar Default en tests!
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build runtime for MasterEnclave::default"));
+        rt.block_on(async {
+            Self::open("admin_test.db", "test_master_key")
+                .await
+                .unwrap_or_else(|_| panic!("Failed to open MasterEnclave in default()"))
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn test_master_admin_flow() {
-        let dir = tempdir().unwrap();
+    async fn test_master_admin_flow() -> anyhow::Result<()> {
+        let dir = tempdir().context("Failed to create tempdir")?;
         let db_path = dir.path().join("admin.db");
-        let path_str = db_path.to_str().unwrap();
+        let path_str = db_path.to_str().context("Path is not valid UTF-8")?;
 
-        let enclave = MasterEnclave::open(path_str, "secret_key").await.unwrap();
+        let enclave = MasterEnclave::open(path_str, "secret_key").await?;
 
-        assert!(!enclave.is_initialized().await.unwrap());
+        assert!(!enclave.is_initialized().await?);
 
-        enclave.initialize_master("root", "haxor").await.unwrap();
-        assert!(enclave.is_initialized().await.unwrap());
+        enclave.initialize_master("root", "haxor").await?;
+        assert!(enclave.is_initialized().await?);
 
-        let is_auth = enclave.authenticate_master("root", "haxor").await.unwrap();
+        let is_auth = enclave.authenticate_master("root", "haxor").await?;
         assert!(is_auth);
 
-        let (port, pass) = enclave.create_tenant("testuser").await.unwrap();
+        let (port, pass) = enclave.create_tenant("testuser").await?;
         assert!(port >= 50052);
         assert!(!pass.is_empty());
 
         enclave
             .reset_tenant_password("testuser", "ignored_for_now")
-            .await
-            .unwrap();
+            .await?;
+        Ok(())
     }
 }

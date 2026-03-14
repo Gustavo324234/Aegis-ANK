@@ -1,6 +1,6 @@
 use crate::dag::{ExecutionGraph, GraphManager};
 use crate::scheduler::compiler::GraphCompiler;
-use tracing::{info, warn, instrument};
+use tracing::{info, instrument, warn};
 
 /// --- GRAPH INTEGRATOR ---
 /// Puente de integración entre el Orquestador S-DAG y el Scheduler de ANK.
@@ -26,12 +26,14 @@ impl GraphIntegrator {
                     error = %e,
                     "S-DAG Validation FAILED (Mathematical Breach). Triggering Fallback."
                 );
-                
+
                 // Aplicar Fallback: Un solo nodo con el prompt original
                 let fallback_graph = GraphCompiler::create_fallback(&graph.original_prompt);
                 let fallback_id = fallback_graph.graph_id.clone();
-                
-                manager.active_graphs.insert(fallback_id.clone(), fallback_graph);
+
+                manager
+                    .active_graphs
+                    .insert(fallback_id.clone(), fallback_graph);
                 info!(fallback_id = %fallback_id, "Monolithic fallback graph registered successfully.");
             }
         }
@@ -41,32 +43,39 @@ impl GraphIntegrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dag::{DagNode, ExecutionGraph, DagNodeStatus};
+    use crate::dag::{DagNode, DagNodeStatus, ExecutionGraph};
     use crate::scheduler::ModelPreference;
+    use anyhow::Context;
     use std::collections::HashMap;
 
     #[test]
-    fn test_integration_fallback_activation() {
+    fn test_integration_fallback_activation() -> anyhow::Result<()> {
         let mut manager = GraphManager::new();
-        
+
         // Grafo con ciclo: A -> B -> A
         let mut nodes = HashMap::new();
-        nodes.insert("A".into(), DagNode {
-            node_id: "A".into(),
-            description: "Task A".into(),
-            dependencies: vec!["B".into()],
-            required_model: ModelPreference::LocalOnly,
-            expected_output: None,
-            status: DagNodeStatus::Pending,
-        });
-        nodes.insert("B".into(), DagNode {
-            node_id: "B".into(),
-            description: "Task B".into(),
-            dependencies: vec!["A".into()],
-            required_model: ModelPreference::LocalOnly,
-            expected_output: None,
-            status: DagNodeStatus::Pending,
-        });
+        nodes.insert(
+            "A".into(),
+            DagNode {
+                node_id: "A".into(),
+                description: "Task A".into(),
+                dependencies: vec!["B".into()],
+                required_model: ModelPreference::LocalOnly,
+                expected_output: None,
+                status: DagNodeStatus::Pending,
+            },
+        );
+        nodes.insert(
+            "B".into(),
+            DagNode {
+                node_id: "B".into(),
+                description: "Task B".into(),
+                dependencies: vec!["A".into()],
+                required_model: ModelPreference::LocalOnly,
+                expected_output: None,
+                status: DagNodeStatus::Pending,
+            },
+        );
 
         let cyclic_graph = ExecutionGraph {
             graph_id: "cyclic_1".into(),
@@ -78,12 +87,21 @@ mod tests {
         GraphIntegrator::validate_and_register(&mut manager, cyclic_graph);
 
         assert_eq!(manager.active_graphs.len(), 1);
-        let registered_graph = manager.active_graphs.values().next().unwrap();
-        
+        let registered_graph = manager
+            .active_graphs
+            .values()
+            .next()
+            .context("Active graphs should contain the fallback")?;
+
         // Debe ser el grafo de fallback (monolítico)
         assert!(registered_graph.graph_id.starts_with("graph_fallback_"));
         assert_eq!(registered_graph.nodes.len(), 1);
-        let node = registered_graph.nodes.values().next().unwrap();
+        let node = registered_graph
+            .nodes
+            .values()
+            .next()
+            .context("Fallback graph should contain one node")?;
         assert_eq!(node.description, "Create a cycle");
+        Ok(())
     }
 }

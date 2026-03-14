@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_parse_read_file() -> anyhow::Result<()> {
         let _ = init_syscall_regexes();
-        // Alineado con el formato estricto: sin ruido previo y sin espacios extra [ANK-915]
+        // Alineado con el formato estricto: sin ruido previo y sin espacios extra [ANK-916]
         let stream = "[READ_FILE(\"src/main.rs\")]";
         let syscall = parse_syscall(stream).context("Should parse read call")?;
 

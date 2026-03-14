@@ -2,7 +2,7 @@ use crate::auth::citadel::{generate_public_tenant_id, sanitize_error, SafeIdenti
 use ank_core::{enclave::master::MasterEnclave, SchedulerEvent, PCB as CorePCB};
 use ank_proto::v1::kernel_service_server::KernelService;
 use ank_proto::v1::{
-    AdminSetupRequest, AdminSetupResponse, Empty, EngineConfigRequest, PasswordResetRequest,
+    AdminSetupRequest, AdminSetupResponse, Empty, EngineConfigRequest,
     Pcb as ProtoPcb, Priority as ProtoPriority, ProcessList, ProcessState as ProtoProcessState,
     SystemState, SystemStatus, TaskEvent, TaskRequest, TaskResponse, TaskSubscription,
     TenantCreateRequest, TenantCreateResponse,
@@ -37,6 +37,7 @@ impl std::fmt::Debug for CitadelAuth {
 /// Extrae la identidad del Tenant pero NO bloquea si faltan headers,
 /// delegando la decisión de seguridad a cada RPC individualmente. Esto es CRÍTICO
 /// para que GetSystemStatus pueda responder 0 (Initializing) a una Shell sin sesión.
+#[allow(clippy::result_large_err)]
 pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
     let metadata = req.metadata();
 
@@ -465,41 +466,6 @@ impl KernelService for AnkRpcServer {
         }
     }
 
-    async fn reset_tenant_password(
-        &self,
-        request: Request<PasswordResetRequest>,
-    ) -> Result<Response<Empty>, Status> {
-        let auth = request
-            .extensions()
-            .get::<CitadelAuth>()
-            .cloned() // Clonamos inmediatamente para desligar de la vida de request
-            .ok_or_else(|| Status::unauthenticated("Citadel Protocol context missing"))?;
-
-        let req = request.into_inner();
-
-        // Validar que sea un Master Admin autorizado o el propio usuario reseteando su password?
-        // En Citadel, normalmente un Master Admin o un servicio de recu puede forzarlo.
-        let is_master = self
-            .master_enclave
-            .authenticate_master(&auth.tenant_id, &auth.session_key)
-            .await
-            .unwrap_or(false);
-
-        // Para simplificar, requerimos Master o que el propio usuario provea auth validado del tenant.
-        // Asumimos root por ahora.
-        if !is_master && auth.tenant_id != req.tenant_id {
-            return Err(Status::permission_denied(
-                "No permission to reset this tenant password",
-            ));
-        }
-
-        self.master_enclave
-            .reset_tenant_password(&req.tenant_id, &req.new_passphrase)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        Ok(Response::new(Empty {}))
-    }
 
     async fn configure_engine(
         &self,

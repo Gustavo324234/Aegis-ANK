@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::Connection;
 use std::path::Path;
 use std::sync::Arc;
@@ -22,11 +22,13 @@ impl MasterEnclave {
         let path = Path::new(db_path);
         if let Some(parent) = path.parent() {
             if !parent.exists() {
+                use anyhow::Context;
                 std::fs::create_dir_all(parent)
-                    .with_context(|| format!("Failed to create directory for admin db"))?;
+                    .with_context(|| "Failed to create directory for admin db".to_string())?;
             }
         }
 
+        use anyhow::Context;
         let conn = Connection::open(db_path)
             .with_context(|| format!("Failed to open master database at {}", db_path))?;
 
@@ -52,7 +54,7 @@ impl MasterEnclave {
 
     async fn init_schema(&self) -> Result<()> {
         let conn = self.connection.lock().await;
-
+        use anyhow::Context;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS master_admin (
                 id INTEGER PRIMARY KEY DEFAULT 1,
@@ -126,6 +128,7 @@ impl MasterEnclave {
 
     /// Inicializa el super administrador (solo si no hay ninguno)
     pub async fn initialize_master(&self, username: &str, passphrase: &str) -> Result<()> {
+        use anyhow::Context;
         if self.is_initialized().await? {
             anyhow::bail!("Master Admin is already initialized. Cannot overwrite.");
         }
@@ -214,6 +217,7 @@ impl MasterEnclave {
 
     /// Genera un nuevo tenant con puerto incrementado asignado, y lo registra
     pub async fn create_tenant(&self, tenant_id: &str) -> Result<(u32, String)> {
+        use anyhow::Context;
         let conn = self.connection.lock().await;
         // En un escenario real, buscaríamos el último puerto usado.
         let mut stmt = conn.prepare("SELECT MAX(network_port) FROM tenants")?;
@@ -255,6 +259,7 @@ impl MasterEnclave {
         tenant_id: &str,
         _new_passphrase: &str,
     ) -> Result<()> {
+        use anyhow::Context;
         let conn = self.connection.lock().await;
         let rows = conn
             .execute(
@@ -272,9 +277,23 @@ impl MasterEnclave {
     }
 }
 
+impl Default for MasterEnclave {
+    fn default() -> Self {
+        // En un entorno real esto debería fallar o usar una DB en memoria.
+        // Como Default no puede ser async, bloqueamos el hilo para el test o usamos un truco.
+        // Para simplificar el test_bridge, usaremos un path y key hardcodeados bloqueantes.
+        // SRE Warning: Solo usar Default en tests!
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap_or_else(|_| panic!("Failed to build runtime for MasterEnclave::default"));
+        rt.block_on(async {
+            Self::open("admin_test.db", "test_master_key").await.unwrap_or_else(|_| panic!("Failed to open MasterEnclave in default()"))
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use tempfile::tempdir;
 
     #[tokio::test]

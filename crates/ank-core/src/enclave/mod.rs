@@ -1,9 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::Connection;
 use std::path::Path;
 use tracing::info;
 
 pub mod master;
+pub use master::MasterEnclave;
 
 /// --- TENANT DB (SECURE ENCLAVE) ---
 /// Gestiona una base de datos SQLite encriptada con SQLCipher por cada tenant.
@@ -15,6 +16,7 @@ impl TenantDB {
     /// Inicializa o abre la base de datos segura para un tenant.
     /// Aplica la session_key mediante PRAGMA key para desencriptar en reposo.
     pub fn open(tenant_id: &str, session_key: &str) -> Result<Self> {
+        use anyhow::Context;
         let db_path = format!("./users/{}/memory.db", tenant_id);
 
         // Asegurar que el directorio del tenant existe
@@ -48,6 +50,7 @@ impl TenantDB {
 
     /// Crea las tablas necesarias para el estado del Kernel si no existen.
     fn init_schema(&self) -> Result<()> {
+        use anyhow::Context;
         self.connection
             .execute(
                 "CREATE TABLE IF NOT EXISTS kv_store (
@@ -64,6 +67,7 @@ impl TenantDB {
 
     /// Inserta o actualiza un valor en el almacén seguro.
     pub fn set_kv(&self, key: &str, value: &str) -> Result<()> {
+        use anyhow::Context;
         self.connection.execute(
             "INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)",
             [key, value],
@@ -89,6 +93,7 @@ impl TenantDB {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use tempfile::tempdir;
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::pcb::PCB;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
@@ -20,6 +20,7 @@ pub struct SQLCipherPersistor {
 
 impl SQLCipherPersistor {
     pub fn new(db_path: &str, key: &str) -> Result<Self> {
+        use anyhow::Context;
         info!(path = %db_path, "Initializing PersistenceManager (SQLCipher).");
         let conn = Connection::open(db_path).context("Failed to open SQLCipher database")?;
 
@@ -52,6 +53,7 @@ impl SQLCipherPersistor {
 #[async_trait]
 impl StatePersistor for SQLCipherPersistor {
     async fn save_pcb(&self, pcb: &PCB) -> Result<()> {
+        use anyhow::Context;
         let pcb_clone = pcb.clone();
         let conn = self.conn.clone();
 
@@ -76,10 +78,12 @@ impl StatePersistor for SQLCipherPersistor {
     }
 
     async fn delete_pcb(&self, pid: &str) -> Result<()> {
+        use anyhow::Context;
         let pid_str = pid.to_string();
         let conn = self.conn.clone();
 
         task::spawn_blocking(move || {
+            use anyhow::Context;
             let lock = conn
                 .lock()
                 .map_err(|_| anyhow::anyhow!("Mutex poison error"))?;
@@ -95,6 +99,7 @@ impl StatePersistor for SQLCipherPersistor {
     }
 
     async fn load_all_pcbs(&self) -> Result<Vec<PCB>> {
+        use anyhow::Context;
         let conn = self.conn.clone();
 
         task::spawn_blocking(move || {
@@ -126,6 +131,7 @@ impl StatePersistor for SQLCipherPersistor {
     }
 
     async fn flush(&self) -> Result<()> {
+        use anyhow::Context;
         let conn = self.conn.clone();
         task::spawn_blocking(move || {
             let lock = conn

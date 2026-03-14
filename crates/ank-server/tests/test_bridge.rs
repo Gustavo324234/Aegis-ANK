@@ -2,23 +2,28 @@ use ank_core::SchedulerEvent;
 use ank_proto::v1::kernel_service_server::KernelService;
 use ank_proto::v1::{Priority as ProtoPriority, TaskRequest};
 use ank_server::server::AnkRpcServer;
-use anyhow::{Context, Result};
+use anyhow::Context;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tonic::Request;
+use ank_core::plugins::PluginManager;
 
 #[tokio::test]
 async fn test_submit_task_logic() -> anyhow::Result<()> {
     let (tx, mut rx) = mpsc::channel(10);
     let broker = Arc::new(RwLock::new(HashMap::new()));
-    let server = AnkRpcServer::new(tx, broker);
+    let master_enclave = ank_core::enclave::MasterEnclave::default();
+    let pm = Arc::new(RwLock::new(PluginManager::new()?));
+    let hal = Arc::new(RwLock::new(ank_core::chal::CognitiveHAL::new(pm)));
+    let server = AnkRpcServer::new(tx, broker, master_enclave, hal);
 
     let request = Request::new(TaskRequest {
         prompt: "Test prompt".to_string(),
         priority: ProtoPriority::Normal as i32,
         policy: None,
         initial_context: None,
+        tenant_id: Some("test_tenant".to_string()),
     });
 
     let response = server

@@ -1,4 +1,4 @@
-#![cfg(feature = "local_llm")]
+// #![cfg(feature = "local_llm")]
 
 use crate::chal::{DriverStatus, ExecutionError, Grammar, InferenceDriver, SystemError};
 use async_trait::async_trait;

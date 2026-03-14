@@ -43,6 +43,7 @@ impl GraphIntegrator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use crate::dag::{DagNode, DagNodeStatus, ExecutionGraph};
     use crate::scheduler::ModelPreference;
     use std::collections::HashMap;

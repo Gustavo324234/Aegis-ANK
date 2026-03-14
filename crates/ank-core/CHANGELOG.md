@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.1] - 2026-03-13
+### Fixed
+- **core:** reconstruct AST to resolve broken compilation after manual purges ([ANK-912])
+- **core:** resolve `anyhow::Context` scoping issues (E0599 and clippy warnings)
+- **core:** update `ed25519-dalek` API to v2.0 (`VerifyingKey` compatibility)
+- **core:** eradicate `expect_err` using `let Err` syntax (clippy compliance)
+- **core:** fix manual string stripping and redundant clones on Copy types
+- **core:** box large enum variants in `SwarmError` to reduce memory footprint
+
+
 ## [0.5.1](https://github.com/Gustavo324234/Aegis-ANK/compare/ank-core-v0.5.0...ank-core-v0.5.1) (2026-03-12)
 
 

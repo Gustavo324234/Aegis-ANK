@@ -113,7 +113,7 @@ impl GraphManager {
 
                     let mut pcb = PCB::new(node.node_id.clone(), 5, description);
 
-                    pcb.model_pref = node.required_model.clone();
+                    pcb.model_pref = node.required_model;
                     pcb.parent_pid = Some(graph_id.clone());
                     pcb.inlined_context = deps_context;
 

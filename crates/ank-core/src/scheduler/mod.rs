@@ -105,11 +105,13 @@ impl CognitiveScheduler {
             tokio::select! {
                 // Prioridad 1: Procesar eventos externos
                 Some(event) = event_rx.recv() => {
+                    use anyhow::Context;
                     self.handle_event(event).await.context("Error handling scheduler event")?;
                 }
 
                 // Prioridad 2: Ciclo de despacho (Reconcile)
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    use anyhow::Context;
                     self.reconcile().await.context("Error during state reconciliation")?;
                 }
 
@@ -129,6 +131,7 @@ impl CognitiveScheduler {
 
     #[instrument(skip(self), name = "ANK_Handle_Event")]
     async fn handle_event(&mut self, event: SchedulerEvent) -> anyhow::Result<()> {
+        use anyhow::Context;
         self.last_activity = Utc::now();
         match event {
             SchedulerEvent::ScheduleTask(pcb_box) => {
@@ -311,6 +314,7 @@ impl CognitiveScheduler {
 
     /// Despacha procesos de la cola de Listos a la "CPU" (ALU/LLM) local o al Swarm si es complejo.
     async fn reconcile(&mut self) -> anyhow::Result<()> {
+        use anyhow::Context;
         if self.current_running.is_none() && !self.ready_queue.is_empty() {
             if let Some(mut pcb) = self.ready_queue.pop() {
                 // LÓGICA DE TELEPORTACIÓN
@@ -394,6 +398,7 @@ pub type SharedScheduler = Arc<RwLock<CognitiveScheduler>>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[tokio::test]
     async fn test_priority_scheduling() -> anyhow::Result<()> {

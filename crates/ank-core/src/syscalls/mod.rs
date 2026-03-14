@@ -55,8 +55,10 @@ use crate::vcm::VirtualContextManager;
 /// El ejecutor de Syscalls es el puente entre el parser y los subsistemas del Kernel.
 pub struct SyscallExecutor {
     plugin_manager: Arc<tokio::sync::RwLock<PluginManager>>,
+    #[allow(dead_code)]
     vcm: Arc<VirtualContextManager>,
     scribe: Arc<ScribeManager>,
+    #[allow(dead_code)]
     swap: Arc<LanceSwapManager>,
     mcp_registry: Arc<ank_mcp::registry::McpToolRegistry>,
 }

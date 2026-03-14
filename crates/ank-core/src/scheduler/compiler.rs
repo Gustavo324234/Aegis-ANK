@@ -110,6 +110,7 @@ impl GraphCompiler {
 mod tests {
     use super::*;
     use crate::dag::DagNode;
+    use anyhow::Context;
     use std::collections::HashMap;
 
     fn create_test_node(id: &str, deps: Vec<&str>) -> DagNode {
@@ -154,7 +155,9 @@ mod tests {
 
         let result = GraphCompiler::validate(&graph);
         assert!(result.is_err());
-        let err = result.expect_err("Validation should fail for cyclic graph");
+        let Err(err) = result else {
+            anyhow::bail!("Validation should fail for cyclic graph");
+        };
         assert!(matches!(err, GraphError::CyclicDependency(_)));
         Ok(())
     }
@@ -172,7 +175,9 @@ mod tests {
 
         let result = GraphCompiler::validate(&graph);
         assert!(result.is_err());
-        let err = result.expect_err("Validation should fail for missing dependency");
+        let Err(err) = result else {
+            anyhow::bail!("Validation should fail for missing dependency");
+        };
         assert!(matches!(err, GraphError::MissingDependency(_, _)));
         Ok(())
     }

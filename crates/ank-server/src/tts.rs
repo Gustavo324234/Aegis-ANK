@@ -1,4 +1,5 @@
 use ank_proto::v1::siren::SirenEvent;
+#[allow(unused_imports)]
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -57,8 +58,8 @@ pub fn spawn_tts_worker(
             let audio_len = 22050 * 2 / 4;
             let mut mock_audio = vec![0u8; audio_len];
 
-            for i in 0..audio_len {
-                mock_audio[i] = (i % 256) as u8;
+            for (i, sample) in mock_audio.iter_mut().enumerate() {
+                *sample = (i % 256) as u8;
             }
 
             seq += 1;

@@ -134,7 +134,7 @@ impl VirtualContextManager {
         let mut l2_str = String::new();
 
         for ref_uri in &pcb.memory_pointers.l2_context_refs {
-            if ref_uri.starts_with("file://") {
+            if let Some(path_part) = ref_uri.strip_prefix("file://") {
                 if current_tokens >= actual_token_limit {
                     if !has_l2 {
                         l2_str.push_str("\n## ATTACHED CONTEXT\n");
@@ -147,7 +147,6 @@ impl VirtualContextManager {
                     continue;
                 }
 
-                let path_part = ref_uri.strip_prefix("file://").unwrap_or(ref_uri);
                 if !is_safe_path(tenant_id, path_part) {
                     return Err(VCMError::PathTraversalDetected(path_part.to_string()));
                 }

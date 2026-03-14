@@ -18,13 +18,19 @@ pub enum SwarmError {
     TransportError(#[from] tonic::transport::Error),
 
     #[error("RPC error: {0}")]
-    RpcError(#[from] tonic::Status),
+    RpcError(#[from] Box<tonic::Status>),
 
     #[error("Teleportation timeout")]
     Timeout,
 
     #[error("Internal conversion error: {0}")]
     ConversionError(String),
+}
+
+impl From<tonic::Status> for SwarmError {
+    fn from(s: tonic::Status) -> Self {
+        Self::RpcError(Box::new(s))
+    }
 }
 
 /// Cliente gRPC para la teletransportación de procesos entre nodos del Swarm.

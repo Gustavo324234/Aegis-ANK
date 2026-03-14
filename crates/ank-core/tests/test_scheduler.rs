@@ -1,5 +1,5 @@
 use ank_core::{CognitiveScheduler, SQLCipherPersistor, SchedulerEvent, PCB};
-use anyhow::{Context, Result};
+use anyhow::Context;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};

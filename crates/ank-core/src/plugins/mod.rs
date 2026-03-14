@@ -537,13 +537,13 @@ mod tests {
     #[tokio::test]
     async fn test_wasm_execution_trap_handling() -> anyhow::Result<()> {
         use ed25519_dalek::SigningKey;
-        
+
         // 1. Generar llaves de prueba
         let signing_key = SigningKey::from_bytes(&[1u8; 32]);
         let verifying_key = signing_key.verifying_key();
-        
-        let signer = PluginSigner::new(&verifying_key.to_bytes())
-            .context("Failed to create test signer")?;
+
+        let signer =
+            PluginSigner::new(&verifying_key.to_bytes()).context("Failed to create test signer")?;
         let mut manager = PluginManager::new_with_signer(signer)?;
 
         // Un wasm mínimo que hace un unreachable (trap)
@@ -570,10 +570,10 @@ mod tests {
         let res = manager.execute_plugin("test_tenant", "test", "{}").await;
 
         assert!(res.is_err());
-        
+
         // Limpiar firma manual
         let _ = std::fs::remove_file(sig_path);
-        
+
         Ok(())
     }
 }

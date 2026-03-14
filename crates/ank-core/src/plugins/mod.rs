@@ -525,6 +525,7 @@ impl PluginManager {
 mod tests {
     use super::*;
     use anyhow::Context;
+    use ed25519_dalek::Signer;
     use std::io::Write;
     use tempfile::NamedTempFile;
 

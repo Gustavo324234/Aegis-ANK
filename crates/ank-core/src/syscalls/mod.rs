@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_parse_read_file() -> anyhow::Result<()> {
         let _ = init_syscall_regexes();
-        // Alineado con el formato estricto: sin ruido previo en el stream para el parser
+        // Alineado con el formato estricto: sin ruido previo y sin espacios extra [ANK-915]
         let stream = "[READ_FILE(\"src/main.rs\")]";
         let syscall = parse_syscall(stream).context("Should parse read call")?;
 
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn test_parse_write_file() -> anyhow::Result<()> {
         let _ = init_syscall_regexes();
-        // Formato estricto: argumentos compactos sin espacios tras las comas
+        // Formato estricto: sin espacios extra tras comas y JSON compacto [ANK-915]
         let stream = "[WRITE_FILE(\"output.txt\",\"Hello World\",{\"task_id\":\"ANK-101\",\"version_increment\":\"patch\",\"summary\":\"test\",\"impact\":\"low\"})]";
         let syscall = parse_syscall(stream).context("Should parse write call")?;
 

@@ -2,10 +2,10 @@ use crate::auth::citadel::{generate_public_tenant_id, sanitize_error, SafeIdenti
 use ank_core::{enclave::master::MasterEnclave, SchedulerEvent, PCB as CorePCB};
 use ank_proto::v1::kernel_service_server::KernelService;
 use ank_proto::v1::{
-    AdminSetupRequest, AdminSetupResponse, Empty, EngineConfigRequest,
-    Pcb as ProtoPcb, Priority as ProtoPriority, ProcessList, ProcessState as ProtoProcessState,
-    SystemState, SystemStatus, TaskEvent, TaskRequest, TaskResponse, TaskSubscription,
-    TenantCreateRequest, TenantCreateResponse,
+    AdminSetupRequest, AdminSetupResponse, Empty, EngineConfigRequest, Pcb as ProtoPcb,
+    Priority as ProtoPriority, ProcessList, ProcessState as ProtoProcessState, SystemState,
+    SystemStatus, TaskEvent, TaskRequest, TaskResponse, TaskSubscription, TenantCreateRequest,
+    TenantCreateResponse,
 };
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -465,7 +465,6 @@ impl KernelService for AnkRpcServer {
             Err(e) => Err(Status::internal(format!("Failed to create tenant: {}", e))),
         }
     }
-
 
     async fn configure_engine(
         &self,

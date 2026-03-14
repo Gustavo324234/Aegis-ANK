@@ -1,3 +1,4 @@
+use ank_core::plugins::PluginManager;
 use ank_core::SchedulerEvent;
 use ank_proto::v1::kernel_service_server::KernelService;
 use ank_proto::v1::{Priority as ProtoPriority, TaskRequest};
@@ -7,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tonic::Request;
-use ank_core::plugins::PluginManager;
 
 #[tokio::test]
 async fn test_submit_task_logic() -> anyhow::Result<()> {

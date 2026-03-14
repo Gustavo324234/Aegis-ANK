@@ -21,11 +21,15 @@ unsafe impl Send for SendVad {}
 #[cfg(feature = "local_voice")]
 impl std::ops::Deref for SendVad {
     type Target = Vad;
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 #[cfg(feature = "local_voice")]
 impl std::ops::DerefMut for SendVad {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 use crate::server::CitadelAuth;
@@ -606,15 +610,18 @@ mod tests {
             let (tx, _rx) = mpsc::channel(1);
             let event_broker = Arc::new(RwLock::new(HashMap::new()));
             // Note: This test will fail if model is missing, which is correct for SRE Zero-Panic/Fail-Fast
-            let service =
-                AnkSirenService::new(tx, event_broker).unwrap_or_else(|e| panic!("Model should be available for test: {:?}", e));
+            let service = AnkSirenService::new(tx, event_broker)
+                .unwrap_or_else(|e| panic!("Model should be available for test: {:?}", e));
 
             // Empaquetar stream como el request de tonic y agregar metadatos de auth falsos
             struct MockDecoder;
             impl tonic::codec::Decoder for MockDecoder {
                 type Item = AudioChunk;
                 type Error = Status;
-                fn decode(&mut self, _src: &mut tonic::codec::DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
+                fn decode(
+                    &mut self,
+                    _src: &mut tonic::codec::DecodeBuf<'_>,
+                ) -> Result<Option<Self::Item>, Self::Error> {
                     // This is a simplified mock for the test, normally prost handles this
                     // In the test we yield raw data, so we don't really care about decoding logic
                     // as long as it satisfies the trait.
@@ -623,13 +630,15 @@ mod tests {
             }
 
             let mut buf = bytes::BytesMut::new();
-            for _ in 0..10 { // Just some dummy frames for VAD test if needed
+            for _ in 0..10 {
+                // Just some dummy frames for VAD test if needed
                 buf.put_u8(0);
                 buf.put_u32(100);
                 buf.put(&vec![0u8; 100][..]);
             }
             let body = http_body_util::Full::new(buf.freeze());
-            let streaming: Streaming<AudioChunk> = Streaming::new_request(MockDecoder, body, None, None);
+            let streaming: Streaming<AudioChunk> =
+                Streaming::new_request(MockDecoder, body, None, None);
             let mut request = Request::new(streaming);
 
             let mut extensions = tonic::Extensions::new();

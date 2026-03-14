@@ -8,7 +8,7 @@
 * **server:** Resolve `ank-server` test compilation (missing fields in `TaskRequest`).
 * **core:** Implement `Default` for `MasterEnclave` and fix re-exports for testing.
 * **core:** Fix Clippy warnings (duplicated attributes in `native.rs` and items order in `master.rs`).
-* **build:** Add missing workspace dependencies `bytes`, `http-body-util` and `async-stream`.
+* **build:** Resolve webrtc-vad, streaming mock decoder & global code formatting.
 
 
 ## [0.2.1](https://github.com/Gustavo324234/Aegis-ANK/compare/ank-server-v0.2.0...ank-server-v0.2.1) (2026-03-12)

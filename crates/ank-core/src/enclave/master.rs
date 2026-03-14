@@ -283,9 +283,14 @@ impl Default for MasterEnclave {
         // Como Default no puede ser async, bloqueamos el hilo para el test o usamos un truco.
         // Para simplificar el test_bridge, usaremos un path y key hardcodeados bloqueantes.
         // SRE Warning: Solo usar Default en tests!
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap_or_else(|_| panic!("Failed to build runtime for MasterEnclave::default"));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build runtime for MasterEnclave::default"));
         rt.block_on(async {
-            Self::open("admin_test.db", "test_master_key").await.unwrap_or_else(|_| panic!("Failed to open MasterEnclave in default()"))
+            Self::open("admin_test.db", "test_master_key")
+                .await
+                .unwrap_or_else(|_| panic!("Failed to open MasterEnclave in default()"))
         })
     }
 }

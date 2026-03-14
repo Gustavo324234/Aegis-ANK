@@ -294,47 +294,50 @@ pub fn init_syscall_regexes() -> anyhow::Result<()> {
 /// Parser de Syscalls Cognitivas.
 /// Detecta llamadas estructuradas dentro del stream de texto de la IA.
 pub fn parse_syscall(text: &str) -> Option<Syscall> {
-    let plugin_re = PLUGIN_RE.get()?;
-    let read_re = READ_RE.get()?;
-    let write_re = WRITE_RE.get()?;
-    let mcp_re = MCP_RE.get()?;
-
     // 1. Check for Plugin Call
-    if let Some(caps) = plugin_re.captures(text) {
-        return Some(Syscall::PluginCall {
-            plugin_name: caps[1].to_string(),
-            args_json: caps[2].to_string(),
-        });
-    }
-
-    // 2. Check for Read File
-    if let Some(caps) = read_re.captures(text) {
-        return Some(Syscall::ReadFile {
-            uri: caps[1].to_string(),
-        });
-    }
-
-    // 3. Check for Write File
-    if let Some(caps) = write_re.captures(text) {
-        let uri = caps[1].to_string();
-        let content = caps[2].to_string();
-        let metadata_json = &caps[3];
-
-        if let Ok(metadata) = serde_json::from_str::<CommitMetadata>(metadata_json) {
-            return Some(Syscall::WriteFile {
-                uri,
-                content,
-                metadata,
+    if let Some(plugin_re) = PLUGIN_RE.get() {
+        if let Some(caps) = plugin_re.captures(text) {
+            return Some(Syscall::PluginCall {
+                plugin_name: caps[1].to_string(),
+                args_json: caps[2].to_string(),
             });
         }
     }
 
+    // 2. Check for Read File
+    if let Some(read_re) = READ_RE.get() {
+        if let Some(caps) = read_re.captures(text) {
+            return Some(Syscall::ReadFile {
+                uri: caps[1].to_string(),
+            });
+        }
+    }
+
+    // 3. Check for Write File
+    if let Some(write_re) = WRITE_RE.get() {
+        if let Some(caps) = write_re.captures(text) {
+            let uri = caps[1].to_string();
+            let content = caps[2].to_string();
+            let metadata_json = &caps[3];
+
+            if let Ok(metadata) = serde_json::from_str::<CommitMetadata>(metadata_json) {
+                return Some(Syscall::WriteFile {
+                    uri,
+                    content,
+                    metadata,
+                });
+            }
+        }
+    }
+
     // 4. Check for MCP Tool Call
-    if let Some(caps) = mcp_re.captures(text) {
-        return Some(Syscall::McpExec {
-            tool_name: caps[1].to_string(),
-            args_json: caps[2].to_string(),
-        });
+    if let Some(mcp_re) = MCP_RE.get() {
+        if let Some(caps) = mcp_re.captures(text) {
+            return Some(Syscall::McpExec {
+                tool_name: caps[1].to_string(),
+                args_json: caps[2].to_string(),
+            });
+        }
     }
 
     None

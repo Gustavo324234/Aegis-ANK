@@ -267,28 +267,26 @@ static WRITE_RE: OnceLock<Regex> = OnceLock::new();
 static MCP_RE: OnceLock<Regex> = OnceLock::new();
 
 /// Inicializa las expresiones regulares de forma segura al arranque del sistema.
-pub fn init_syscall_regexes() -> anyhow::Result<()> {
-    PLUGIN_RE
-        .set(Regex::new(
-            r#"\[SYS_CALL_PLUGIN\("([^"]+)",\s*(\{.*?\})\)\]"#,
-        )?)
-        .map_err(|_| anyhow::anyhow!("PLUGIN_RE already initialized"))?;
+#[allow(clippy::expect_used)]
+pub fn init_syscall_regexes() {
+    let _ = PLUGIN_RE.get_or_init(|| {
+        Regex::new(r#"\[SYS_CALL_PLUGIN\("([^"]+)",\s*(\{.*?\})\)\]"#)
+            .expect("FATAL: Invalid PLUGIN_RE regex")
+    });
 
-    READ_RE
-        .set(Regex::new(r#"\[READ_FILE\("([^"]+)"\)\]"#)?)
-        .map_err(|_| anyhow::anyhow!("READ_RE already initialized"))?;
+    let _ = READ_RE.get_or_init(|| {
+        Regex::new(r#"\[READ_FILE\("([^"]+)"\)\]"#).expect("FATAL: Invalid READ_RE regex")
+    });
 
-    WRITE_RE
-        .set(Regex::new(
-            r#"\[WRITE_FILE\("([^"]+)",\s*"([\s\S]*?)",\s*(\{.*?\})\)\]"#,
-        )?)
-        .map_err(|_| anyhow::anyhow!("WRITE_RE already initialized"))?;
+    let _ = WRITE_RE.get_or_init(|| {
+        Regex::new(r#"\[WRITE_FILE\("([^"]+)",\s*"([\s\S]*?)",\s*(\{.*?\})\)\]"#)
+            .expect("FATAL: Invalid WRITE_RE regex")
+    });
 
-    MCP_RE
-        .set(Regex::new(r#"\[SYS_MCP_EXEC\("([^"]+)",\s*(\{.*?\})\)\]"#)?)
-        .map_err(|_| anyhow::anyhow!("MCP_RE already initialized"))?;
-
-    Ok(())
+    let _ = MCP_RE.get_or_init(|| {
+        Regex::new(r#"\[SYS_MCP_EXEC\("([^"]+)",\s*(\{.*?\})\)\]"#)
+            .expect("FATAL: Invalid MCP_RE regex")
+    });
 }
 
 /// Parser de Syscalls Cognitivas.
@@ -350,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_parse_plugin_call() -> anyhow::Result<()> {
-        let _ = init_syscall_regexes();
+        init_syscall_regexes();
         let stream = "El resultado es: [SYS_CALL_PLUGIN(\"weather\", {\"city\": \"Paris\"})]";
         let syscall = parse_syscall(stream).context("Should parse plugin call")?;
 
@@ -369,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_parse_read_file() -> anyhow::Result<()> {
-        let _ = init_syscall_regexes();
+        init_syscall_regexes();
         // Inyectamos el protocolo 'file://' que el parser estricto espera tras el refactor SRE
         let stream = r#"[READ_FILE("file://src/main.rs")]"#;
         let syscall = parse_syscall(stream).context("Should parse read call")?;
@@ -385,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_parse_write_file() -> anyhow::Result<()> {
-        let _ = init_syscall_regexes();
+        init_syscall_regexes();
         // Inyectamos el protocolo 'file://' y usamos Raw Strings (r#...#)
         let stream = r#"[WRITE_FILE("file://output.txt", "Hello World", {"task_id":"ANK-101","version_increment":"patch","summary":"test","impact":"low"})]"#;
         let syscall = parse_syscall(stream).context("Should parse write call")?;

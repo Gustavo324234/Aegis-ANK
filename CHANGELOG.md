@@ -12,6 +12,7 @@
 ## [2.1.0] - Unreleased
 
 ###🟩 DONE (Completado)
+- [ANK-917] Concurrent Regex Initialization Fix: Resolved race condition in global regex initialization by using idempotent `get_or_init` and removing `anyhow::Result` from the boot sequence [DONE]
 - [ANK-916] Syscall Test Payload Alignment (Final): Alignment of test payloads with strict StreamInterceptor protocol [ANK-916] `[DONE]`
 - [ANK-915] Syscall Test Payload Alignment: Sync test payloads with strict StreamInterceptor protocol (v0.6.3) `[DONE]`
 - [ANK-913] Test Suite Modernization: Comply with Ed25519 & Strict SRE Policies (v0.6.2) `[DONE]`

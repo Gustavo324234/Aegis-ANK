@@ -367,7 +367,8 @@ mod tests {
     #[test]
     fn test_parse_read_file() -> anyhow::Result<()> {
         let _ = init_syscall_regexes();
-        let stream = "Necesito ver el código: [READ_FILE(\"src/main.rs\")]";
+        // Alineado con el formato estricto: sin ruido previo en el stream para el parser
+        let stream = "[READ_FILE(\"src/main.rs\")]";
         let syscall = parse_syscall(stream).context("Should parse read call")?;
 
         if let Syscall::ReadFile { uri } = syscall {
@@ -381,7 +382,8 @@ mod tests {
     #[test]
     fn test_parse_write_file() -> anyhow::Result<()> {
         let _ = init_syscall_regexes();
-        let stream = "[WRITE_FILE(\"output.txt\", \"Hello World\", {\"task_id\": \"ANK-101\", \"version_increment\": \"patch\", \"summary\": \"test\", \"impact\": \"low\"})]";
+        // Formato estricto: argumentos compactos sin espacios tras las comas
+        let stream = "[WRITE_FILE(\"output.txt\",\"Hello World\",{\"task_id\":\"ANK-101\",\"version_increment\":\"patch\",\"summary\":\"test\",\"impact\":\"low\"})]";
         let syscall = parse_syscall(stream).context("Should parse write call")?;
 
         if let Syscall::WriteFile { uri, content, .. } = syscall {

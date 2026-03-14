@@ -116,8 +116,12 @@ impl ScribeManager {
         let repo = Repository::open(&tenant_path)
             .map_err(|e| ScribeError::GitError(format!("Failed to open repo: {}", e)))?;
 
-        // 2. Escritura física asíncrona
-        let full_path = Path::new(&self.root_path).join(file_path);
+        // 2. Escritura física asíncrona - Aseguramos que el directorio exista
+        let full_path = Path::new(&tenant_path).join(file_path);
+        if let Some(parent) = full_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
         tokio::fs::write(&full_path, content)
             .await
             .map_err(|e| ScribeError::FileWriteError(file_path.to_string(), e.to_string()))?;
@@ -235,6 +239,9 @@ mod tests {
             summary: "Initial test commit".into(),
             impact: ImpactLevel::Low,
         };
+
+        let tenant_path = scribe.compute_tenant_path(tenant_id);
+        std::fs::create_dir_all(Path::new(&tenant_path)).unwrap_or_default();
 
         scribe
             .write_and_commit(tenant_id, "test.txt", b"Hello Scribe", metadata.clone())

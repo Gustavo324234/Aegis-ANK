@@ -11,6 +11,9 @@
 
 ## [2.1.0] - Unreleased
 
+###🟩 DONE (Completado)
+- [ANK-913] Test Suite Modernization: Comply with Ed25519 & Strict SRE Policies (v0.6.2) `[DONE]`
+- [ANK-912] THE AST RECONSTRUCTION: Scoping, Dalek v2 & Clippy Purge (v0.6.1) `[DONE]`
 ### Added
 - **[ANK-910] Zero-Tolerance Clippy Purge & Manual Indexing Sanitization:**
   - Implemented the `Strip Prefix` law: replaced all manual string indexing (e.g., `&uri[7..]`) with `strip_prefix("file://")` across `syscalls/mod.rs` and `vcm/mod.rs` to prevent index out of bounds.
@@ -86,7 +89,7 @@
   - Implementación de `McpClientSession` siguiendo el Patrón Actor para la multiplexación asíncrona de mensajes JSON-RPC.
   - **Multiplexación de Promesas**: Uso de un diccionario de promesas con canales `oneshot` de Tokio indexados por UUIDs para correlacionar peticiones y respuestas concurrentes.
   - **Resiliencia Hardened**: Implementación obligatoria de timeouts de 30 segundos en todas las llamadas `call` para evitar bloqueos del S-DAG.
-  - **Notificación de Cierre**: Mecanismo de limpieza que notifica proactivamente a todas las peticiones pendientes (`ConnectionClosed`) si el transporte subyecente colapsa.
+  - **Notificación de Cierre**: Mecanismo de limpieza que notifica proactivamente a todas las peticiones pendientes (`ConnectionClosed`) si el transporte subyacente colapsa.
   - **Zero-Panic Architectural Design**: Gestión segura de canales y locks de concurrencia (`Arc<Mutex<HashMap>>`) evitando deadlocks y garantizando robustez industrial.
 
 ### Refactored
@@ -346,6 +349,8 @@
     - **SRE Fallback (Resilience)**: Implemented automatic recovery where failed teleportations are re-queued locally, ensuring zero task loss.
     - **Context Inlining**: Added `inlined_context` support to PCB to bundle local files and dependencies before migration.
 
+- **[ANK-913]** Test Suite Modernization: Comply with Ed25519 & Strict SRE Policies (v0.6.2) `[DONE]`
+- **[ANK-912]** THE AST RECONSTRUCTION: Scoping, Dalek v2 & Clippy Purge (v0.6.1) `[DONE]`
 ## [0.7.0] - 2026-02-28
 ### Added
 - **[ANK-400] Neural Swarm Discovery (mDNS/Zeroconf)**:

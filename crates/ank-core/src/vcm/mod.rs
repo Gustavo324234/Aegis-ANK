@@ -340,6 +340,7 @@ mod tests {
         assert!(
             context.contains("omitido por falta de memoria")
                 || context.contains("omitido por tamaño excesivo")
+                || context.contains("truncado por falta de memoria")
         );
         assert!(!context.contains(&large_content));
         assert!(context.contains("Small task"));

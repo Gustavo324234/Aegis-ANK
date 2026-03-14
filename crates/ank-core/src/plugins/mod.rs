@@ -77,6 +77,15 @@ impl PluginManager {
     /// Inicializa el motor de Wasm con configuraciones optimizadas
     /// y medidas de seguridad (Fuel consumption, WASI, CPU limits).
     pub fn new() -> Result<Self, PluginError> {
+        // En un entorno real, AEGIS_ROOT_KEY vendría de enclave/vault.
+        let public_key = [0u8; 32];
+        let signer = PluginSigner::new(&public_key)
+            .map_err(|e| PluginError::IOError(format!("Failed to init Signer: {}", e)))?;
+        Self::new_with_signer(signer)
+    }
+
+    /// Inicializa el gestor con un firmador específico (útil para tests o rotación de llaves).
+    pub fn new_with_signer(signer: PluginSigner) -> Result<Self, PluginError> {
         let mut config = Config::new();
 
         // --- CONFIGURACIÓN DE SEGURIDAD Y RENDIMIENTO ---
@@ -93,12 +102,6 @@ impl PluginManager {
             &mut s.wasi_ctx
         })
         .map_err(|e| PluginError::CompilationFailed(e.to_string()))?;
-
-        // Root key para validación de plugins (Ring 0)
-        // En un entorno real, AEGIS_ROOT_KEY vendría de enclave/vault.
-        let public_key = [0u8; 32];
-        let signer = PluginSigner::new(&public_key)
-            .map_err(|e| PluginError::IOError(format!("Failed to init Signer: {}", e)))?;
 
         Ok(Self {
             engine,
@@ -533,7 +536,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_wasm_execution_trap_handling() -> anyhow::Result<()> {
-        let mut manager = PluginManager::new()?;
+        use ed25519_dalek::SigningKey;
+        
+        // 1. Generar llaves de prueba
+        let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+        let verifying_key = signing_key.verifying_key();
+        
+        let signer = PluginSigner::new(&verifying_key.to_bytes())
+            .context("Failed to create test signer")?;
+        let mut manager = PluginManager::new_with_signer(signer)?;
 
         // Un wasm mínimo que hace un unreachable (trap)
         let wasm_bytes = [
@@ -550,11 +561,19 @@ mod tests {
             .to_str()
             .context("Temp file path is not UTF-8")?;
 
+        // 2. Firmar el WASM
+        let signature = signing_key.sign(&wasm_bytes);
+        let sig_path = file.path().with_extension("wasm.sig");
+        std::fs::write(&sig_path, signature.to_bytes()).context("Failed to write signature")?;
+
         manager.load_plugin(path).await?;
         let res = manager.execute_plugin("test_tenant", "test", "{}").await;
 
         assert!(res.is_err());
-        // Debe ser un ExecutionTrap o similar
+        
+        // Limpiar firma manual
+        let _ = std::fs::remove_file(sig_path);
+        
         Ok(())
     }
 }
